@@ -1,0 +1,13 @@
+# Dashboard provisioning - loads JSON dashboards from the dashboards folder
+apiVersion: 1
+providers:
+  - name: S&P 500
+    orgId: 1
+    folder: S&P 500
+    folderUid: sp500
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
