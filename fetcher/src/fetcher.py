@@ -1,19 +1,37 @@
 """yfinance data fetching with rate limiting and retry logic."""
 
+import io
 import logging
 import time
 from datetime import datetime
 from typing import List, Optional, Tuple
 
 import pandas as pd
+import requests
 import yfinance as yf
-from yfinance.const import YFRateLimitError
 
 from .config import FetcherConfig
+
+# YFRateLimitError added in yfinance 0.2.58; fallback for older versions
+try:
+    from yfinance.const import YFRateLimitError
+except ImportError:
+    YFRateLimitError = None
+
+
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    """Detect rate limit from yfinance (works across versions)."""
+    msg = str(exc).lower()
+    return "rate limit" in msg or "too many requests" in msg or "429" in msg
 
 logger = logging.getLogger(__name__)
 
 WIKIPEDIA_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+
+# User-Agent required by Wikipedia to avoid 403 Forbidden
+WIKIPEDIA_HEADERS = {
+    "User-Agent": "StockAnalysisGrafana/1.0 (https://github.com/stock-analysis; data collection)",
+}
 
 
 def fetch_sp500_tickers() -> List[Tuple[str, str, str, str]]:
@@ -22,7 +40,9 @@ def fetch_sp500_tickers() -> List[Tuple[str, str, str, str]]:
     Returns list of (symbol, name, sector, industry).
     """
     logger.info("Fetching S&P 500 tickers from Wikipedia")
-    tables = pd.read_html(WIKIPEDIA_SP500_URL)
+    resp = requests.get(WIKIPEDIA_SP500_URL, headers=WIKIPEDIA_HEADERS, timeout=30)
+    resp.raise_for_status()
+    tables = pd.read_html(io.BytesIO(resp.content))
     df = tables[0]
     # Standard Wikipedia table columns: Symbol, Security, GICS Sector, GICS Sub-Industry
     # Some pages use different column names; handle variations
@@ -145,21 +165,25 @@ def fetch_historical_data(
                 if not df.empty:
                     all_records.append(df)
                 break
-            except YFRateLimitError as e:
-                wait = config.retry_delay_seconds * (2 ** attempt)
-                logger.warning(
-                    "Rate limited (chunk %d/%d), retry %d/%d in %.0fs: %s",
-                    i + 1,
-                    len(chunks),
-                    attempt + 1,
-                    config.max_retries,
-                    wait,
-                    str(e),
-                )
-                time.sleep(wait)
             except Exception as e:
-                logger.error("Chunk %d failed: %s", i + 1, str(e))
-                raise
+                is_rate_limit = _is_rate_limit_error(e) or (
+                    YFRateLimitError is not None and isinstance(e, YFRateLimitError)
+                )
+                if is_rate_limit:
+                    wait = config.retry_delay_seconds * (2 ** attempt)
+                    logger.warning(
+                        "Rate limited (chunk %d/%d), retry %d/%d in %.0fs: %s",
+                        i + 1,
+                        len(chunks),
+                        attempt + 1,
+                        config.max_retries,
+                        wait,
+                        str(e),
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.error("Chunk %d failed: %s", i + 1, str(e))
+                    raise
 
         if i < len(chunks) - 1:
             time.sleep(config.delay_seconds)

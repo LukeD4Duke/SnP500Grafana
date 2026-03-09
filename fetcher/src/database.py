@@ -87,7 +87,7 @@ def upsert_tickers(config: DatabaseConfig, tickers: List[Tuple[str, str, str, st
         return 0
 
     upsert_sql = """
-        INSERT INTO tickers (symbol, name, sector, industry, updated_at)
+        INSERT INTO tickers (symbol, name, sector, industry)
         VALUES %s
         ON CONFLICT (symbol) DO UPDATE SET
             name = EXCLUDED.name,
