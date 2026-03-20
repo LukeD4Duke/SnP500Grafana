@@ -2,6 +2,7 @@ services:
   timescaledb:
     image: timescale/timescaledb:latest-pg17
     container_name: stock-timescaledb
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-stocks}
       POSTGRES_USER: ${DB_USER:-postgres}
@@ -9,8 +10,7 @@ services:
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init-db.sql:ro
-    ports:
-      - "5432:5432"
+    # Keep PostgreSQL internal to the stack on the home server.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-stocks}"]
       interval: 5s
@@ -22,6 +22,7 @@ services:
       context: ./fetcher
       dockerfile: Dockerfile
     container_name: stock-fetcher
+    restart: unless-stopped
     environment:
       DB_HOST: timescaledb
       DB_PORT: 5432
@@ -39,28 +40,25 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: stock-grafana
+    restart: unless-stopped
     environment:
+      DB_NAME: ${DB_NAME:-stocks}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_HTTP_PORT: 3000
+      GF_SERVER_DOMAIN: ${GRAFANA_HOST:-10.10.0.42}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://10.10.0.42:3001}
       GF_INSTALL_PLUGINS: ""
-      # Datasource provisioning via env vars (connects to TimescaleDB)
-      GF_DATASOURCES_DEFAULT_ENABLED: "true"
-      GF_DATASOURCES_DEFAULT_NAME: TimescaleDB
-      GF_DATASOURCES_DEFAULT_TYPE: postgres
-      GF_DATASOURCES_DEFAULT_URL: timescaledb:5432
-      GF_DATASOURCES_DEFAULT_USER: ${DB_USER:-postgres}
-      GF_DATASOURCES_DEFAULT_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
-      GF_DATASOURCES_DEFAULT_DATABASE: ${DB_NAME:-stocks}
-      GF_DATASOURCES_DEFAULT_IS_DEFAULT: "true"
-      GF_DATASOURCES_DEFAULT_JSON_DATA: '{"sslmode":"disable","postgresVersion":1700,"timescaledb":true}'
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "3000:3000"
+      # Publish Grafana on a non-default host port because 3000 is already in use.
+      - "${GRAFANA_BIND_IP:-10.10.0.42}:${GRAFANA_PORT:-3001}:3000"
     depends_on:
       - timescaledb
 
