@@ -149,6 +149,14 @@ def get_all_symbols(config: DatabaseConfig) -> List[str]:
             return [r[0] for r in cur.fetchall()]
 
 
+def has_stock_price_data(config: DatabaseConfig) -> bool:
+    """Return whether the stock_prices table already contains data."""
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM stock_prices LIMIT 1)")
+            return cur.fetchone()[0]
+
+
 def schema_exists(config: DatabaseConfig) -> bool:
     """Check if the schema has been initialized."""
     with get_connection(config) as conn:

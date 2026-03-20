@@ -2,18 +2,19 @@
 
 ## Quick Description
 
-**SnP500Grafana** is a containerized application that collects S&P 500 stock market data and visualizes it in Grafana. It pulls OHLCV (Open, High, Low, Close, Volume) price data from Yahoo Finance, stores it in TimescaleDB (time-series optimized PostgreSQL), and provides interactive dashboards with ticker selection, price charts, and volume analysis. The fetcher runs an initial historical load and schedules daily updates after US market close.
+**SnP500Grafana** is a containerized application that collects S&P 500 stock market data and visualizes it in Grafana. It pulls OHLCV (Open, High, Low, Close, Volume) price data from Yahoo Finance, stores it in TimescaleDB (time-series optimized PostgreSQL), and provides generated dashboards for ticker, sector, and industry analysis. The fetcher performs a full historical load only when the database is empty and schedules incremental updates after the US market close.
 
 ## Architecture
 
-- **TimescaleDB**: Time-series optimized PostgreSQL for stock prices
-- **stock-fetcher**: Python service that fetches data from Wikipedia (ticker list) and Yahoo Finance (OHLCV), with rate limiting and retries
-- **Grafana**: Dashboards with ticker selection, close price, volume, and OHLC charts
+- **TimescaleDB**: time-series optimized PostgreSQL for stock prices
+- **stock-fetcher**: Python service that fetches data from Wikipedia (ticker list) and Yahoo Finance (OHLCV), with retries and cached-symbol fallback
+- **Grafana**: provisioned datasource plus generated dashboards driven by ticker metadata
 
 ## Prerequisites
 
 - Docker and Docker Compose
 - Portainer (optional, for web-based deployment)
+- Python with `grafanalib` installed locally if you want to regenerate dashboard JSON
 
 ## Quick Start
 
@@ -24,27 +25,42 @@
    cp .env.example .env
    ```
 
-3. Set **required** variables in `.env`:
-   - `DB_PASSWORD` – PostgreSQL/TimescaleDB password
-   - `GRAFANA_ADMIN_PASSWORD` – Grafana admin password
+3. Set required variables in `.env`:
+   - `DB_PASSWORD` - PostgreSQL/TimescaleDB password
+   - `GRAFANA_ADMIN_PASSWORD` - Grafana admin password
 
 4. Deploy the stack:
    ```bash
    docker compose up -d
    ```
 
-5. Wait for the initial data load (15–30 minutes for full S&P 500 history). Monitor logs:
+5. Wait for the initial data load if the database is empty. Monitor logs:
    ```bash
    docker compose logs -f stock-fetcher
    ```
 
-6. Open Grafana at `http://localhost:3000`, log in with admin credentials, and go to **Dashboards → S&P 500 → S&P 500 Stock Overview**.
+6. Open Grafana at `http://localhost:3000`, log in with the admin credentials, and open the dashboards under **Dashboards > S&P 500**.
+
+## Dashboard Generation
+
+Dashboard JSON is committed to the repo so Grafana can start without any generation step. If you update the dashboard templates, regenerate the JSON files locally:
+
+```bash
+pip install -r requirements-dev.txt
+python scripts/generate_dashboards.py
+```
+
+Generated dashboards:
+
+- `S&P 500 Stock Overview`
+- `S&P 500 Sector Overview`
+- `S&P 500 Industry Overview`
 
 ## Deployment via Portainer
 
-1. In Portainer: **Stacks** → **Add stack**
-2. Paste the contents of `docker-compose.yml` (or upload the file)
-3. Under **Environment variables**, add:
+1. In Portainer, go to **Stacks > Add stack**
+2. Paste the contents of `docker-compose.yml` or upload the file
+3. Under environment variables, add:
    - `DB_PASSWORD` (required)
    - `GRAFANA_ADMIN_PASSWORD` (required)
 4. Deploy the stack
@@ -72,14 +88,16 @@
 
 ## Data Flow
 
-1. **Initial load**: On first start, the fetcher downloads all S&P 500 tickers from Wikipedia and historical OHLCV data from Yahoo Finance (chunked with delays to avoid rate limits).
-2. **Daily updates**: At the configured cron time (default 6 PM ET), the fetcher fetches the last 7 days of data and upserts into the database.
-3. **Grafana**: Connects to TimescaleDB and queries `stock_prices` and `tickers` for dashboards.
+1. **Initial load**: On first start with an empty database, the fetcher downloads the S&P 500 ticker set from Wikipedia and historical OHLCV data from Yahoo Finance.
+2. **Restart behavior**: On later restarts, the fetcher performs an incremental sync instead of replaying the full historical backfill.
+3. **Daily updates**: At the configured cron time, the fetcher reloads the last 7 days of data and upserts into the database.
+4. **Grafana**: Loads a file-provisioned TimescaleDB datasource and generated dashboards that query `stock_prices` and `tickers`.
 
 ## Limitations
 
-- **yfinance** is community-maintained and depends on Yahoo Finance. For production-critical deployments, consider paid APIs (Polygon.io, Alpha Vantage).
-- Rate limiting: Initial load may take 15–30 minutes. Do not reduce chunk delay excessively.
+- `yfinance` is community-maintained and depends on Yahoo Finance. For production-critical deployments, consider paid APIs such as Polygon.io or Alpha Vantage.
+- Rate limiting still affects the initial load. Do not reduce chunk delays aggressively.
+- Dashboard generation requires a local Python environment with `grafanalib`.
 
 ## License
 

@@ -9,6 +9,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from .config import get_database_config, get_fetcher_config
 from .database import (
+    get_all_symbols,
+    has_stock_price_data,
     init_schema,
     schema_exists,
     upsert_stock_prices,
@@ -30,10 +32,21 @@ def run_sync(full_historical: bool = False) -> None:
     db_config = get_database_config()
     fetcher_config = get_fetcher_config()
 
-    # Fetch tickers from Wikipedia
-    tickers_meta = fetch_sp500_tickers()
-    upsert_tickers(db_config, tickers_meta)
-    symbols = [t[0] for t in tickers_meta]
+    try:
+        tickers_meta = fetch_sp500_tickers()
+    except Exception as exc:
+        symbols = get_all_symbols(db_config)
+        if not symbols:
+            raise
+        tickers_meta = []
+        logger.warning(
+            "Failed to refresh tickers from Wikipedia, using %d cached symbols: %s",
+            len(symbols),
+            exc,
+        )
+    else:
+        upsert_tickers(db_config, tickers_meta)
+        symbols = [t[0] for t in tickers_meta]
 
     if full_historical:
         start = fetcher_config.historical_start
@@ -93,8 +106,12 @@ def main() -> None:
     else:
         logger.info("Schema already exists")
 
-    logger.info("Running initial historical load (this may take 15-30 minutes)")
-    run_sync(full_historical=True)
+    if has_stock_price_data(db_config):
+        logger.info("Existing stock price data found, running startup incremental sync")
+        run_sync(full_historical=False)
+    else:
+        logger.info("No stock price data found, running initial historical load (this may take 15-30 minutes)")
+        run_sync(full_historical=True)
 
     scheduler = BlockingScheduler()
     scheduler.add_job(
