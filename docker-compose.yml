@@ -38,7 +38,9 @@ services:
         condition: service_healthy
 
   grafana:
-    image: grafana/grafana:latest
+    build:
+      context: .
+      dockerfile: grafana/Dockerfile
     container_name: stock-grafana
     restart: unless-stopped
     environment:
@@ -54,8 +56,6 @@ services:
       GF_INSTALL_PLUGINS: ""
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       # Publish Grafana on a non-default host port because 3000 is already in use.
       - "${GRAFANA_BIND_IP:-10.10.0.42}:${GRAFANA_PORT:-3001}:3000"

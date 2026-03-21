@@ -8,7 +8,7 @@
 
 - **TimescaleDB**: time-series optimized PostgreSQL for stock prices
 - **stock-fetcher**: Python service that fetches data from Wikipedia (ticker list) and Yahoo Finance (OHLCV), with retries and cached-symbol fallback
-- **Grafana**: provisioned datasource plus generated dashboards driven by ticker metadata
+- **Grafana**: custom image with baked-in datasource provisioning and generated dashboards driven by ticker metadata
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@
 
 ## Dashboard Generation
 
-Dashboard JSON is committed to the repo so Grafana can start without any generation step. If you update the dashboard templates, regenerate the JSON files locally:
+Dashboard JSON is committed to the repo and baked into the Grafana image, so Grafana can start without any generation step. If you update the dashboard templates, regenerate the JSON files locally:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -59,11 +59,13 @@ Generated dashboards:
 ## Deployment via Portainer
 
 1. In Portainer, go to **Stacks > Add stack**
-2. Paste the contents of `docker-compose.yml` or upload the file
+2. Deploy from a repository checkout or upload the full project directory so Portainer has the Docker build context for the custom Grafana image
 3. Under environment variables, add:
    - `DB_PASSWORD` (required)
    - `GRAFANA_ADMIN_PASSWORD` (required)
-4. Deploy the stack
+4. Deploy the stack and wait for Portainer to build the Grafana image
+
+Pasting only the contents of `docker-compose.yml` is not sufficient unless the stack also has access to the repository files referenced by the build context.
 
 ## Configuration
 
@@ -91,7 +93,7 @@ Generated dashboards:
 1. **Initial load**: On first start with an empty database, the fetcher downloads the S&P 500 ticker set from Wikipedia and historical OHLCV data from Yahoo Finance.
 2. **Restart behavior**: On later restarts, the fetcher performs an incremental sync instead of replaying the full historical backfill.
 3. **Daily updates**: At the configured cron time, the fetcher reloads the last 7 days of data and upserts into the database.
-4. **Grafana**: Loads a file-provisioned TimescaleDB datasource and generated dashboards that query `stock_prices` and `tickers`.
+4. **Grafana**: Starts from a custom image that already contains the provisioned TimescaleDB datasource and generated dashboards that query `stock_prices` and `tickers`.
 
 ## Limitations
 
