@@ -2,7 +2,6 @@
 
 import logging
 import sys
-from pathlib import Path
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -25,7 +24,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
-INIT_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init-db.sql"
 
 
 def run_sync(full_historical: bool = False) -> None:
@@ -102,7 +100,7 @@ def main() -> None:
 
     if not schema_exists(db_config):
         logger.info("Initializing database schema")
-        init_schema(db_config, INIT_SCRIPT_PATH)
+        init_schema(db_config)
     else:
         logger.info("Schema already exists")
 

@@ -51,14 +51,14 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_HTTP_PORT: 3000
-      GF_SERVER_DOMAIN: ${GRAFANA_HOST:-10.10.0.42}
-      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://10.10.0.42:3001}
+      GF_SERVER_DOMAIN: ${GRAFANA_HOST:-localhost}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
       GF_INSTALL_PLUGINS: ""
     volumes:
       - grafana_data:/var/lib/grafana
     ports:
-      # Publish Grafana on a non-default host port because 3000 is already in use.
-      - "${GRAFANA_BIND_IP:-10.10.0.42}:${GRAFANA_PORT:-3001}:3000"
+      # Publish Grafana on the local loopback by default; override for remote access.
+      - "${GRAFANA_BIND_IP:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     depends_on:
       - timescaledb
 

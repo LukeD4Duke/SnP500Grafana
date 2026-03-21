@@ -159,6 +159,7 @@ def fetch_historical_data(
     ]
 
     for i, chunk in enumerate(chunks):
+        chunk_symbols = ", ".join(chunk)
         for attempt in range(config.max_retries):
             try:
                 df = _fetch_chunk(chunk, start, end)
@@ -170,13 +171,29 @@ def fetch_historical_data(
                     YFRateLimitError is not None and isinstance(e, YFRateLimitError)
                 )
                 if is_rate_limit:
+                    attempt_num = attempt + 1
+                    total_attempts = config.max_retries
                     wait = config.retry_delay_seconds * (2 ** attempt)
+                    if attempt_num >= total_attempts:
+                        logger.error(
+                            "Rate limited (chunk %d/%d) exhausted after %d/%d retries for symbols [%s]: %s",
+                            i + 1,
+                            len(chunks),
+                            attempt_num,
+                            total_attempts,
+                            chunk_symbols,
+                            str(e),
+                        )
+                        raise RuntimeError(
+                            "Rate limit retries exhausted for chunk "
+                            f"{i + 1}/{len(chunks)} with symbols [{chunk_symbols}]"
+                        ) from e
                     logger.warning(
                         "Rate limited (chunk %d/%d), retry %d/%d in %.0fs: %s",
                         i + 1,
                         len(chunks),
-                        attempt + 1,
-                        config.max_retries,
+                        attempt_num,
+                        total_attempts,
                         wait,
                         str(e),
                     )
