@@ -25,6 +25,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+INIT_SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init-db.sql"
 
 
 def run_sync(full_historical: bool = False) -> None:
@@ -101,8 +102,7 @@ def main() -> None:
 
     if not schema_exists(db_config):
         logger.info("Initializing database schema")
-        init_script = Path(__file__).parent.parent.parent / "scripts" / "init-db.sql"
-        init_schema(db_config, init_script)
+        init_schema(db_config, INIT_SCRIPT_PATH)
     else:
         logger.info("Schema already exists")
 

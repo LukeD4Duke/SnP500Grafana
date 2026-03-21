@@ -11,6 +11,52 @@ from psycopg2.extras import execute_values
 from .config import DatabaseConfig
 
 logger = logging.getLogger(__name__)
+DEFAULT_INIT_SQL = """
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+CREATE TABLE IF NOT EXISTS tickers (
+    symbol VARCHAR(10) PRIMARY KEY,
+    name VARCHAR(255),
+    sector VARCHAR(100),
+    industry VARCHAR(150),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS stock_prices (
+    symbol VARCHAR(10) NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    open NUMERIC(12, 4),
+    high NUMERIC(12, 4),
+    low NUMERIC(12, 4),
+    close NUMERIC(12, 4),
+    volume BIGINT,
+    dividends NUMERIC(12, 6) DEFAULT 0,
+    stock_splits NUMERIC(12, 6) DEFAULT 0,
+    PRIMARY KEY (symbol, timestamp)
+);
+
+SELECT create_hypertable(
+    'stock_prices',
+    'timestamp',
+    if_not_exists => TRUE,
+    chunk_time_interval => INTERVAL '1 month'
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol ON stock_prices (symbol, timestamp DESC);
+"""
+
+
+def resolve_init_script_path() -> Path:
+    """Resolve the schema init script location in local and containerized runs."""
+    module_path = Path(__file__).resolve()
+    candidates = (
+        module_path.parents[1] / "scripts" / "init-db.sql",
+        module_path.parents[2] / "scripts" / "init-db.sql",
+    )
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 @contextmanager
@@ -54,12 +100,13 @@ def wait_for_db(config: DatabaseConfig, max_attempts: int = 30) -> bool:
 
 def init_schema(config: DatabaseConfig, init_script_path: Optional[Path] = None) -> None:
     """Initialize database schema from init script or inline SQL."""
-    script_path = init_script_path or Path(__file__).parent.parent.parent / "scripts" / "init-db.sql"
-    if not script_path.exists():
-        raise FileNotFoundError(f"Init script not found: {script_path}")
-
-    with open(script_path, "r") as f:
-        sql = f.read()
+    script_path = init_script_path or resolve_init_script_path()
+    if script_path.exists():
+        sql = script_path.read_text(encoding="utf-8")
+        logger.info("Loading schema from %s", script_path)
+    else:
+        sql = DEFAULT_INIT_SQL
+        logger.warning("Init script not found at %s, using embedded schema SQL", script_path)
 
     # Split into statements and execute separately for robustness
     statements = [s.strip() for s in sql.split(";") if s.strip()]

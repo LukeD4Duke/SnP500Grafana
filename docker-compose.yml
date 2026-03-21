@@ -19,8 +19,8 @@ services:
 
   stock-fetcher:
     build:
-      context: ./fetcher
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: fetcher/Dockerfile
     container_name: stock-fetcher
     restart: unless-stopped
     environment:
