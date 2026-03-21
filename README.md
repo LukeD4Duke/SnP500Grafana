@@ -14,7 +14,7 @@
 
 - Docker and Docker Compose
 - Portainer (optional, for web-based deployment)
-- Python with `grafanalib` installed locally if you want to regenerate dashboard JSON
+- Python if you want to regenerate dashboard JSON locally
 
 ## Quick Start
 
@@ -28,6 +28,11 @@
 3. Set required variables in `.env`:
    - `DB_PASSWORD` - PostgreSQL/TimescaleDB password
    - `GRAFANA_ADMIN_PASSWORD` - Grafana admin password
+   - Optional Grafana overrides if you need remote access:
+     - `GRAFANA_BIND_IP` - defaults to `127.0.0.1`
+     - `GRAFANA_PORT` - defaults to `3000`
+     - `GRAFANA_HOST` - defaults to `localhost`
+     - `GRAFANA_ROOT_URL` - defaults to `http://localhost:3000`
 
 4. Deploy the stack:
    ```bash
@@ -52,6 +57,7 @@ python scripts/generate_dashboards.py
 
 Generated dashboards:
 
+- `S&P 500 Ticker Detail`
 - `S&P 500 Stock Overview`
 - `S&P 500 Sector Overview`
 - `S&P 500 Industry Overview`
@@ -63,9 +69,10 @@ Generated dashboards:
 3. Under environment variables, add:
    - `DB_PASSWORD` (required)
    - `GRAFANA_ADMIN_PASSWORD` (required)
+   - Override `GRAFANA_BIND_IP`, `GRAFANA_PORT`, `GRAFANA_HOST`, and `GRAFANA_ROOT_URL` if the stack should be reachable off-host
 4. Deploy the stack and wait for Portainer to build the Grafana image
 
-Pasting only the contents of `docker-compose.yml` is not sufficient unless the stack also has access to the repository files referenced by the build context.
+Pasting only the contents of `docker-compose.yml` is not sufficient unless the stack also has access to the repository files referenced by the build context. The compose defaults are tuned for local development, so remote deployments should supply explicit Grafana host and URL values.
 
 ## Configuration
 
@@ -73,6 +80,10 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 |----------|---------|-------------|
 | `DB_PASSWORD` | *(required)* | Database password |
 | `GRAFANA_ADMIN_PASSWORD` | *(required)* | Grafana admin password |
+| `GRAFANA_BIND_IP` | `127.0.0.1` | Host IP for published Grafana port |
+| `GRAFANA_PORT` | `3000` | Published host port for Grafana |
+| `GRAFANA_HOST` | `localhost` | Grafana server domain |
+| `GRAFANA_ROOT_URL` | `http://localhost:3000` | Grafana public URL |
 | `DB_NAME` | `stocks` | Database name |
 | `DB_USER` | `postgres` | Database user |
 | `UPDATE_CRON` | `0 23 * * *` | Cron: daily at 11 PM UTC (6 PM ET) |
@@ -85,7 +96,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | Service | Port | Description |
 |---------|------|-------------|
 | TimescaleDB | 5432 | PostgreSQL + TimescaleDB |
-| Grafana | 3000 | Dashboards and visualization |
+| Grafana | 3000 | Dashboards and visualization, bound to `127.0.0.1:3000` by default |
 | stock-fetcher | - | Data fetcher and daily scheduler |
 
 ## Data Flow
@@ -99,7 +110,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 
 - `yfinance` is community-maintained and depends on Yahoo Finance. For production-critical deployments, consider paid APIs such as Polygon.io or Alpha Vantage.
 - Rate limiting still affects the initial load. Do not reduce chunk delays aggressively.
-- Dashboard generation requires a local Python environment with `grafanalib`.
+- Dashboard generation requires a local Python environment.
 
 ## License
 

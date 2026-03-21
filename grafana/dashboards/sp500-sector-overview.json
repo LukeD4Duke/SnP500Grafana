@@ -142,7 +142,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "blue",
+                "color": "green",
                 "value": null
               }
             ]
@@ -251,10 +251,19 @@
     "sector",
     "generated"
   ],
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "S&P 500 Sector Overview",
+  "uid": "sp500-sector-overview",
+  "version": 1,
+  "weekStart": "",
   "templating": {
     "list": [
       {
-        "allValue": "*",
         "current": {
           "selected": true,
           "text": "All",
@@ -276,18 +285,9 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
-        "type": "query"
+        "type": "query",
+        "allValue": "*"
       }
     ]
-  },
-  "time": {
-    "from": "now-1y",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "browser",
-  "title": "S&P 500 Sector Overview",
-  "uid": "sp500-sector-overview",
-  "version": 1,
-  "weekStart": ""
+  }
 }

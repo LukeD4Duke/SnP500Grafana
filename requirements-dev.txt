@@ -1,1 +1,1 @@
-grafanalib>=0.7.1
+# No additional development dependencies are currently required.

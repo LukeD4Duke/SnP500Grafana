@@ -339,10 +339,19 @@
     "stocks",
     "generated"
   ],
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "S&P 500 Stock Overview",
+  "uid": "sp500-stock-overview",
+  "version": 1,
+  "weekStart": "",
   "templating": {
     "list": [
       {
-        "allValue": "*",
         "current": {
           "selected": true,
           "text": "All",
@@ -364,10 +373,10 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
-        "type": "query"
+        "type": "query",
+        "allValue": "*"
       },
       {
-        "allValue": "*",
         "current": {
           "selected": true,
           "text": "All",
@@ -389,7 +398,8 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
-        "type": "query"
+        "type": "query",
+        "allValue": "*"
       },
       {
         "current": {},
@@ -412,15 +422,5 @@
         "type": "query"
       }
     ]
-  },
-  "time": {
-    "from": "now-1y",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "browser",
-  "title": "S&P 500 Stock Overview",
-  "uid": "sp500-stock-overview",
-  "version": 1,
-  "weekStart": ""
+  }
 }
