@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from .config import get_database_config, get_fetcher_config
 from .database import (
     get_all_symbols,
+    get_price_date_bounds,
     has_stock_price_data,
     init_schema,
     schema_exists,
@@ -26,7 +27,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_sync(full_historical: bool = False) -> None:
+def run_sync(
+    full_historical: bool = False,
+    start_override: str | None = None,
+    end_override: str | None = None,
+    mode_label: str | None = None,
+) -> None:
     """Fetch S&P 500 data and upsert into database."""
     db_config = get_database_config()
     fetcher_config = get_fetcher_config()
@@ -47,9 +53,11 @@ def run_sync(full_historical: bool = False) -> None:
         upsert_tickers(db_config, tickers_meta)
         symbols = [t[0] for t in tickers_meta]
 
-    if full_historical:
+    end = end_override
+    if start_override:
+        start = start_override
+    elif full_historical:
         start = fetcher_config.historical_start
-        logger.info("Running full historical sync from %s", start)
     else:
         # Daily update: fetch last 7 days to handle weekends/holidays
         from datetime import datetime, timedelta
@@ -57,11 +65,27 @@ def run_sync(full_historical: bool = False) -> None:
         end_dt = datetime.now()
         start_dt = end_dt - timedelta(days=7)
         start = start_dt.strftime("%Y-%m-%d")
-        logger.info("Running incremental sync from %s", start)
+
+    if mode_label:
+        if end:
+            logger.info("%s from %s to %s", mode_label, start, end)
+        else:
+            logger.info("%s from %s", mode_label, start)
+    elif full_historical:
+        if end:
+            logger.info("Running full historical sync from %s to %s", start, end)
+        else:
+            logger.info("Running full historical sync from %s", start)
+    else:
+        if end:
+            logger.info("Running incremental sync from %s to %s", start, end)
+        else:
+            logger.info("Running incremental sync from %s", start)
 
     df = fetch_historical_data(
         symbols,
         start=start,
+        end=end,
         config=fetcher_config,
     )
 
@@ -107,6 +131,38 @@ def main() -> None:
     if has_stock_price_data(db_config):
         logger.info("Existing stock price data found, running startup incremental sync")
         run_sync(full_historical=False)
+        min_price_date, max_price_date = get_price_date_bounds(db_config)
+        logger.info(
+            "Current price data range after incremental sync: %s to %s",
+            min_price_date or "n/a",
+            max_price_date or "n/a",
+        )
+
+        backfill_start = fetcher_config.backfill_start
+        if backfill_start and min_price_date and backfill_start < min_price_date:
+            logger.info(
+                "Backfill requested; filling older history from %s up to existing earliest date %s",
+                backfill_start,
+                min_price_date,
+            )
+            run_sync(
+                full_historical=True,
+                start_override=backfill_start,
+                end_override=min_price_date,
+                mode_label="Running startup backfill",
+            )
+            min_price_date, max_price_date = get_price_date_bounds(db_config)
+            logger.info(
+                "Price data range after backfill: %s to %s",
+                min_price_date or "n/a",
+                max_price_date or "n/a",
+            )
+        elif backfill_start:
+            logger.info(
+                "BACKFILL_START=%s already covered by existing earliest date %s; skipping startup backfill",
+                backfill_start,
+                min_price_date or "n/a",
+            )
     else:
         logger.info("No stock price data found, running initial historical load (this may take 15-30 minutes)")
         run_sync(full_historical=True)

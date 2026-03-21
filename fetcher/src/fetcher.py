@@ -159,12 +159,38 @@ def fetch_historical_data(
     ]
 
     for i, chunk in enumerate(chunks):
+        chunk_num = i + 1
         chunk_symbols = ", ".join(chunk)
+        logger.info(
+            "Fetching chunk %d/%d (%d tickers) from %s to %s",
+            chunk_num,
+            len(chunks),
+            len(chunk),
+            start,
+            end,
+        )
         for attempt in range(config.max_retries):
             try:
                 df = _fetch_chunk(chunk, start, end)
                 if not df.empty:
+                    min_date = df["Date"].min()
+                    max_date = df["Date"].max()
+                    logger.info(
+                        "Fetched chunk %d/%d with %d rows spanning %s to %s",
+                        chunk_num,
+                        len(chunks),
+                        len(df),
+                        min_date.date().isoformat() if hasattr(min_date, "date") else str(min_date),
+                        max_date.date().isoformat() if hasattr(max_date, "date") else str(max_date),
+                    )
                     all_records.append(df)
+                else:
+                    logger.warning(
+                        "Fetched chunk %d/%d but received no rows for symbols [%s]",
+                        chunk_num,
+                        len(chunks),
+                        chunk_symbols,
+                    )
                 break
             except Exception as e:
                 is_rate_limit = _is_rate_limit_error(e) or (
@@ -177,7 +203,7 @@ def fetch_historical_data(
                     if attempt_num >= total_attempts:
                         logger.error(
                             "Rate limited (chunk %d/%d) exhausted after %d/%d retries for symbols [%s]: %s",
-                            i + 1,
+                            chunk_num,
                             len(chunks),
                             attempt_num,
                             total_attempts,
@@ -186,11 +212,11 @@ def fetch_historical_data(
                         )
                         raise RuntimeError(
                             "Rate limit retries exhausted for chunk "
-                            f"{i + 1}/{len(chunks)} with symbols [{chunk_symbols}]"
+                            f"{chunk_num}/{len(chunks)} with symbols [{chunk_symbols}]"
                         ) from e
                     logger.warning(
                         "Rate limited (chunk %d/%d), retry %d/%d in %.0fs: %s",
-                        i + 1,
+                        chunk_num,
                         len(chunks),
                         attempt_num,
                         total_attempts,
@@ -199,7 +225,7 @@ def fetch_historical_data(
                     )
                     time.sleep(wait)
                 else:
-                    logger.error("Chunk %d failed: %s", i + 1, str(e))
+                    logger.error("Chunk %d/%d failed: %s", chunk_num, len(chunks), str(e))
                     raise
 
         if i < len(chunks) - 1:

@@ -33,6 +33,8 @@
      - `GRAFANA_PORT` - defaults to `3001`
      - `GRAFANA_HOST` - defaults to `localhost`
      - `GRAFANA_ROOT_URL` - defaults to `http://localhost:3001`
+   - Optional backfill override if you need to extend existing history earlier than the current earliest stored date:
+     - `BACKFILL_START` - example `2000-01-01`
 
 4. Deploy the stack:
    ```bash
@@ -43,6 +45,8 @@
    ```bash
    docker compose logs -f stock-fetcher
    ```
+
+   For an older-history backfill on a populated database, set `BACKFILL_START` and restart the stack. The fetcher will still run its normal startup incremental sync first, then fetch older data from `BACKFILL_START` up to the earliest date already in `stock_prices`.
 
 6. Open Grafana at `http://localhost:3001`, log in with the admin credentials, and open the dashboards under **Dashboards > S&P 500**.
 
@@ -90,6 +94,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `YFINANCE_CHUNK_SIZE` | `50` | Tickers per batch (rate limit mitigation) |
 | `YFINANCE_DELAY_SEC` | `2.5` | Delay between batches (seconds) |
 | `HISTORICAL_START` | `2020-01-01` | Start date for initial historical load |
+| `BACKFILL_START` | *(unset)* | Optional one-time startup backfill start date for older history on a populated database |
 
 ## Services
 
@@ -103,8 +108,31 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 
 1. **Initial load**: On first start with an empty database, the fetcher downloads the S&P 500 ticker set from Wikipedia and historical OHLCV data from Yahoo Finance.
 2. **Restart behavior**: On later restarts, the fetcher performs an incremental sync instead of replaying the full historical backfill.
-3. **Daily updates**: At the configured cron time, the fetcher reloads the last 7 days of data and upserts into the database.
-4. **Grafana**: Starts from a custom image that already contains the provisioned TimescaleDB datasource and generated dashboards that query `stock_prices` and `tickers`.
+3. **Optional backfill**: If `BACKFILL_START` is set and the database already contains newer rows, the fetcher can backfill older history without clearing the database first.
+4. **Daily updates**: At the configured cron time, the fetcher reloads the last 7 days of data and upserts into the database.
+5. **Grafana**: Starts from a custom image that already contains the provisioned TimescaleDB datasource and generated dashboards that query `stock_prices` and `tickers`.
+
+## Monitoring Backfill Progress
+
+Use fetcher logs to monitor chunk-level progress:
+
+```bash
+docker compose logs -f stock-fetcher
+```
+
+During a backfill, the fetcher logs:
+
+- the requested backfill window
+- each chunk number and ticker count
+- rows returned per chunk and the date span for that chunk
+- the final upsert count
+
+You can also inspect the stored date range directly in PostgreSQL:
+
+```sql
+SELECT COUNT(*), MIN(timestamp), MAX(timestamp)
+FROM stock_prices;
+```
 
 ## Limitations
 

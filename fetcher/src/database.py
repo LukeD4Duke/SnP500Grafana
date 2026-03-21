@@ -188,6 +188,21 @@ def get_last_date(config: DatabaseConfig, symbol: str) -> Optional[str]:
             return None
 
 
+def get_price_date_bounds(config: DatabaseConfig) -> Tuple[Optional[str], Optional[str]]:
+    """Get the earliest and latest price dates present in stock_prices."""
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT MIN(timestamp)::date, MAX(timestamp)::date FROM stock_prices"
+            )
+            row = cur.fetchone()
+            if not row:
+                return None, None
+            min_date = str(row[0]) if row[0] else None
+            max_date = str(row[1]) if row[1] else None
+            return min_date, max_date
+
+
 def get_all_symbols(config: DatabaseConfig) -> List[str]:
     """Get all symbols from the tickers table."""
     with get_connection(config) as conn:
