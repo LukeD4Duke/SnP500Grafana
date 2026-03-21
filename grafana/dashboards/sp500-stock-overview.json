@@ -355,7 +355,7 @@
         "current": {
           "selected": true,
           "text": "All",
-          "value": "*"
+          "value": "__all"
         },
         "datasource": {
           "type": "postgres",
@@ -374,32 +374,32 @@
         "skipUrlSync": false,
         "sort": 1,
         "type": "query",
-        "allValue": "*"
+        "allValue": "__all"
       },
       {
         "current": {
           "selected": true,
           "text": "All",
-          "value": "*"
+          "value": "__all"
         },
         "datasource": {
           "type": "postgres",
           "uid": "timescaledb"
         },
-        "definition": "SELECT DISTINCT industry FROM tickers WHERE industry IS NOT NULL AND industry <> '' AND ('${sector}' = '*' OR sector IN (${sector:sqlstring})) ORDER BY 1",
+        "definition": "SELECT DISTINCT industry FROM tickers WHERE industry IS NOT NULL AND industry <> '' AND (${sector:sqlstring} = '__all' OR sector IN (${sector:sqlstring})) ORDER BY 1",
         "hide": 0,
         "includeAll": true,
         "label": "Industry",
         "multi": false,
         "name": "industry",
         "options": [],
-        "query": "SELECT DISTINCT industry FROM tickers WHERE industry IS NOT NULL AND industry <> '' AND ('${sector}' = '*' OR sector IN (${sector:sqlstring})) ORDER BY 1",
+        "query": "SELECT DISTINCT industry FROM tickers WHERE industry IS NOT NULL AND industry <> '' AND (${sector:sqlstring} = '__all' OR sector IN (${sector:sqlstring})) ORDER BY 1",
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
         "sort": 1,
         "type": "query",
-        "allValue": "*"
+        "allValue": "__all"
       },
       {
         "current": {},
@@ -407,14 +407,14 @@
           "type": "postgres",
           "uid": "timescaledb"
         },
-        "definition": "SELECT symbol FROM tickers WHERE ('${sector}' = '*' OR sector IN (${sector:sqlstring})) AND ('${industry}' = '*' OR industry IN (${industry:sqlstring})) ORDER BY symbol",
+        "definition": "SELECT symbol FROM tickers WHERE (${sector:sqlstring} = '__all' OR sector IN (${sector:sqlstring})) AND (${industry:sqlstring} = '__all' OR industry IN (${industry:sqlstring})) ORDER BY symbol",
         "hide": 0,
         "includeAll": false,
         "label": "Ticker",
         "multi": false,
         "name": "ticker",
         "options": [],
-        "query": "SELECT symbol FROM tickers WHERE ('${sector}' = '*' OR sector IN (${sector:sqlstring})) AND ('${industry}' = '*' OR industry IN (${industry:sqlstring})) ORDER BY symbol",
+        "query": "SELECT symbol FROM tickers WHERE (${sector:sqlstring} = '__all' OR sector IN (${sector:sqlstring})) AND (${industry:sqlstring} = '__all' OR industry IN (${industry:sqlstring})) ORDER BY symbol",
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,

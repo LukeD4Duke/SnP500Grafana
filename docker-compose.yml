@@ -52,13 +52,13 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_HTTP_PORT: 3000
       GF_SERVER_DOMAIN: ${GRAFANA_HOST:-localhost}
-      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
       GF_INSTALL_PLUGINS: ""
     volumes:
       - grafana_data:/var/lib/grafana
     ports:
       # Publish Grafana on the local loopback by default; override for remote access.
-      - "${GRAFANA_BIND_IP:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+      - "${GRAFANA_BIND_IP:-127.0.0.1}:${GRAFANA_PORT:-3001}:3000"
     depends_on:
       - timescaledb
 

@@ -90,7 +90,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT sp.timestamp AS time, AVG(sp.close) AS \"Average Close\"\nFROM stock_prices sp\nJOIN tickers t ON t.symbol = sp.symbol\nWHERE ('${sector}' = '*' OR t.sector IN (${sector:sqlstring}))\nAND $__timeFilter(sp.timestamp)\nGROUP BY sp.timestamp\nORDER BY sp.timestamp",
+          "rawSql": "SELECT sp.timestamp AS time, AVG(sp.close) AS \"Average Close\"\nFROM stock_prices sp\nJOIN tickers t ON t.symbol = sp.symbol\nWHERE (${sector:sqlstring} = '__all' OR t.sector IN (${sector:sqlstring}))\nAND $__timeFilter(sp.timestamp)\nGROUP BY sp.timestamp\nORDER BY sp.timestamp",
           "refId": "A"
         }
       ],
@@ -178,7 +178,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT sp.timestamp AS time, SUM(sp.volume) AS \"Total Volume\"\nFROM stock_prices sp\nJOIN tickers t ON t.symbol = sp.symbol\nWHERE ('${sector}' = '*' OR t.sector IN (${sector:sqlstring}))\nAND $__timeFilter(sp.timestamp)\nGROUP BY sp.timestamp\nORDER BY sp.timestamp",
+          "rawSql": "SELECT sp.timestamp AS time, SUM(sp.volume) AS \"Total Volume\"\nFROM stock_prices sp\nJOIN tickers t ON t.symbol = sp.symbol\nWHERE (${sector:sqlstring} = '__all' OR t.sector IN (${sector:sqlstring}))\nAND $__timeFilter(sp.timestamp)\nGROUP BY sp.timestamp\nORDER BY sp.timestamp",
           "refId": "A"
         }
       ],
@@ -235,7 +235,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT symbol, name, sector, industry\nFROM tickers\nWHERE ('${sector}' = '*' OR sector IN (${sector:sqlstring}))\nORDER BY symbol",
+          "rawSql": "SELECT symbol, name, sector, industry\nFROM tickers\nWHERE (${sector:sqlstring} = '__all' OR sector IN (${sector:sqlstring}))\nORDER BY symbol",
           "refId": "A"
         }
       ],
@@ -267,7 +267,7 @@
         "current": {
           "selected": true,
           "text": "All",
-          "value": "*"
+          "value": "__all"
         },
         "datasource": {
           "type": "postgres",
@@ -286,7 +286,7 @@
         "skipUrlSync": false,
         "sort": 1,
         "type": "query",
-        "allValue": "*"
+        "allValue": "__all"
       }
     ]
   }

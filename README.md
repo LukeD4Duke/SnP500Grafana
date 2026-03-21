@@ -30,9 +30,9 @@
    - `GRAFANA_ADMIN_PASSWORD` - Grafana admin password
    - Optional Grafana overrides if you need remote access:
      - `GRAFANA_BIND_IP` - defaults to `127.0.0.1`
-     - `GRAFANA_PORT` - defaults to `3000`
+     - `GRAFANA_PORT` - defaults to `3001`
      - `GRAFANA_HOST` - defaults to `localhost`
-     - `GRAFANA_ROOT_URL` - defaults to `http://localhost:3000`
+     - `GRAFANA_ROOT_URL` - defaults to `http://localhost:3001`
 
 4. Deploy the stack:
    ```bash
@@ -44,7 +44,7 @@
    docker compose logs -f stock-fetcher
    ```
 
-6. Open Grafana at `http://localhost:3000`, log in with the admin credentials, and open the dashboards under **Dashboards > S&P 500**.
+6. Open Grafana at `http://localhost:3001`, log in with the admin credentials, and open the dashboards under **Dashboards > S&P 500**.
 
 ## Dashboard Generation
 
@@ -81,9 +81,9 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `DB_PASSWORD` | *(required)* | Database password |
 | `GRAFANA_ADMIN_PASSWORD` | *(required)* | Grafana admin password |
 | `GRAFANA_BIND_IP` | `127.0.0.1` | Host IP for published Grafana port |
-| `GRAFANA_PORT` | `3000` | Published host port for Grafana |
+| `GRAFANA_PORT` | `3001` | Published host port for Grafana |
 | `GRAFANA_HOST` | `localhost` | Grafana server domain |
-| `GRAFANA_ROOT_URL` | `http://localhost:3000` | Grafana public URL |
+| `GRAFANA_ROOT_URL` | `http://localhost:3001` | Grafana public URL |
 | `DB_NAME` | `stocks` | Database name |
 | `DB_USER` | `postgres` | Database user |
 | `UPDATE_CRON` | `0 23 * * *` | Cron: daily at 11 PM UTC (6 PM ET) |
@@ -96,7 +96,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | Service | Port | Description |
 |---------|------|-------------|
 | TimescaleDB | 5432 | PostgreSQL + TimescaleDB |
-| Grafana | 3000 | Dashboards and visualization, bound to `127.0.0.1:3000` by default |
+| Grafana | 3001 | Dashboards and visualization, bound to `127.0.0.1:3001` by default |
 | stock-fetcher | - | Data fetcher and daily scheduler |
 
 ## Data Flow

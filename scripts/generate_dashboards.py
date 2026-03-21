@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_DIR = ROOT / "grafana" / "dashboards"
 DATASOURCE = {"type": "postgres", "uid": "timescaledb"}
 TIME_RANGE = {"from": "now-1y", "to": "now"}
+ALL_SENTINEL = "__all"
 
 
 def base_dashboard(title: str, uid: str, tags: list[str]) -> dict:
@@ -196,7 +197,7 @@ def stat_panel(
 
 def query_variable(name: str, label: str, query: str, refresh: int, include_all: bool = True) -> dict:
     variable = {
-        "current": {"selected": True, "text": "All", "value": "*"} if include_all else {},
+        "current": {"selected": True, "text": "All", "value": ALL_SENTINEL} if include_all else {},
         "datasource": DATASOURCE,
         "definition": query,
         "hide": 0,
@@ -213,7 +214,7 @@ def query_variable(name: str, label: str, query: str, refresh: int, include_all:
         "type": "query",
     }
     if include_all:
-        variable["allValue"] = "*"
+        variable["allValue"] = ALL_SENTINEL
     return variable
 
 
@@ -237,7 +238,7 @@ def stock_overview_dashboard() -> dict:
                 (
                     "SELECT DISTINCT industry FROM tickers "
                     "WHERE industry IS NOT NULL AND industry <> '' "
-                    "AND ('${sector}' = '*' OR sector IN (${sector:sqlstring})) ORDER BY 1"
+                    f"AND (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR sector IN (${{sector:sqlstring}})) ORDER BY 1"
                 ),
                 2,
             ),
@@ -246,8 +247,8 @@ def stock_overview_dashboard() -> dict:
                 "Ticker",
                 (
                     "SELECT symbol FROM tickers "
-                    "WHERE ('${sector}' = '*' OR sector IN (${sector:sqlstring})) "
-                    "AND ('${industry}' = '*' OR industry IN (${industry:sqlstring})) "
+                    f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR sector IN (${{sector:sqlstring}})) "
+                    f"AND (${{industry:sqlstring}} = '{ALL_SENTINEL}' OR industry IN (${{industry:sqlstring}})) "
                     "ORDER BY symbol"
                 ),
                 2,
@@ -523,7 +524,7 @@ def sector_overview_dashboard() -> dict:
                 "SELECT sp.timestamp AS time, AVG(sp.close) AS \"Average Close\"\n"
                 "FROM stock_prices sp\n"
                 "JOIN tickers t ON t.symbol = sp.symbol\n"
-                "WHERE ('${sector}' = '*' OR t.sector IN (${sector:sqlstring}))\n"
+                f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR t.sector IN (${{sector:sqlstring}}))\n"
                 "AND $__timeFilter(sp.timestamp)\n"
                 "GROUP BY sp.timestamp\n"
                 "ORDER BY sp.timestamp"
@@ -544,7 +545,7 @@ def sector_overview_dashboard() -> dict:
                 "SELECT sp.timestamp AS time, SUM(sp.volume) AS \"Total Volume\"\n"
                 "FROM stock_prices sp\n"
                 "JOIN tickers t ON t.symbol = sp.symbol\n"
-                "WHERE ('${sector}' = '*' OR t.sector IN (${sector:sqlstring}))\n"
+                f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR t.sector IN (${{sector:sqlstring}}))\n"
                 "AND $__timeFilter(sp.timestamp)\n"
                 "GROUP BY sp.timestamp\n"
                 "ORDER BY sp.timestamp"
@@ -564,7 +565,7 @@ def sector_overview_dashboard() -> dict:
             sql=(
                 "SELECT symbol, name, sector, industry\n"
                 "FROM tickers\n"
-                "WHERE ('${sector}' = '*' OR sector IN (${sector:sqlstring}))\n"
+                f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR sector IN (${{sector:sqlstring}}))\n"
                 "ORDER BY symbol"
             ),
             x=0,
@@ -596,7 +597,7 @@ def industry_overview_dashboard() -> dict:
                 (
                     "SELECT DISTINCT industry FROM tickers "
                     "WHERE industry IS NOT NULL AND industry <> '' "
-                    "AND ('${sector}' = '*' OR sector IN (${sector:sqlstring})) ORDER BY 1"
+                    f"AND (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR sector IN (${{sector:sqlstring}})) ORDER BY 1"
                 ),
                 2,
             ),
@@ -610,8 +611,8 @@ def industry_overview_dashboard() -> dict:
                 "SELECT sp.timestamp AS time, AVG(sp.close) AS \"Average Close\"\n"
                 "FROM stock_prices sp\n"
                 "JOIN tickers t ON t.symbol = sp.symbol\n"
-                "WHERE ('${sector}' = '*' OR t.sector IN (${sector:sqlstring}))\n"
-                "AND ('${industry}' = '*' OR t.industry IN (${industry:sqlstring}))\n"
+                f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR t.sector IN (${{sector:sqlstring}}))\n"
+                f"AND (${{industry:sqlstring}} = '{ALL_SENTINEL}' OR t.industry IN (${{industry:sqlstring}}))\n"
                 "AND $__timeFilter(sp.timestamp)\n"
                 "GROUP BY sp.timestamp\n"
                 "ORDER BY sp.timestamp"
@@ -632,8 +633,8 @@ def industry_overview_dashboard() -> dict:
                 "SELECT sp.timestamp AS time, SUM(sp.volume) AS \"Total Volume\"\n"
                 "FROM stock_prices sp\n"
                 "JOIN tickers t ON t.symbol = sp.symbol\n"
-                "WHERE ('${sector}' = '*' OR t.sector IN (${sector:sqlstring}))\n"
-                "AND ('${industry}' = '*' OR t.industry IN (${industry:sqlstring}))\n"
+                f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR t.sector IN (${{sector:sqlstring}}))\n"
+                f"AND (${{industry:sqlstring}} = '{ALL_SENTINEL}' OR t.industry IN (${{industry:sqlstring}}))\n"
                 "AND $__timeFilter(sp.timestamp)\n"
                 "GROUP BY sp.timestamp\n"
                 "ORDER BY sp.timestamp"
@@ -653,8 +654,8 @@ def industry_overview_dashboard() -> dict:
             sql=(
                 "SELECT symbol, name, sector, industry\n"
                 "FROM tickers\n"
-                "WHERE ('${sector}' = '*' OR sector IN (${sector:sqlstring}))\n"
-                "AND ('${industry}' = '*' OR industry IN (${industry:sqlstring}))\n"
+                f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR sector IN (${{sector:sqlstring}}))\n"
+                f"AND (${{industry:sqlstring}} = '{ALL_SENTINEL}' OR industry IN (${{industry:sqlstring}}))\n"
                 "ORDER BY symbol"
             ),
             x=0,
