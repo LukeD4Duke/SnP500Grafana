@@ -105,7 +105,23 @@ def timeseries_panel(
     }
 
 
-def table_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: int, h: int) -> dict:
+def apply_timeseries_color(panel: dict, color: str) -> dict:
+    panel["fieldConfig"]["defaults"]["color"] = {"mode": "fixed", "fixedColor": color}
+    return panel
+
+
+def table_panel(
+    *,
+    panel_id: int,
+    title: str,
+    sql: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    show_header: bool = True,
+    overrides: list[dict] | None = None,
+) -> dict:
     return {
         "datasource": DATASOURCE,
         "fieldConfig": {
@@ -118,14 +134,14 @@ def table_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: int, 
                 "mappings": [],
                 "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
             },
-            "overrides": [],
+            "overrides": overrides or [],
         },
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "id": panel_id,
         "options": {
             "cellHeight": "sm",
             "footer": {"show": False},
-            "showHeader": True,
+            "showHeader": show_header,
         },
         "targets": [
             {
@@ -139,6 +155,99 @@ def table_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: int, 
         ],
         "title": title,
         "type": "table",
+    }
+
+
+def ticker_link_override(field_name: str = "ticker") -> dict:
+    return {
+        "matcher": {"id": "byName", "options": field_name},
+        "properties": [
+            {
+                "id": "links",
+                "value": [
+                    {
+                        "targetBlank": False,
+                        "title": "Open ticker detail",
+                        "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}",
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def bar_chart_panel(
+    *,
+    panel_id: int,
+    title: str,
+    sql: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    x_field: str,
+    color_by_field: str | None = None,
+    overrides: list[dict] | None = None,
+) -> dict:
+    return {
+        "datasource": DATASOURCE,
+        "fieldConfig": {
+            "defaults": {
+                "color": {"mode": "palette-classic"},
+                "custom": {
+                    "axisBorderShow": False,
+                    "axisCenteredZero": False,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "fillOpacity": 80,
+                    "gradientMode": "none",
+                    "hideFrom": {"legend": False, "tooltip": False, "viz": False},
+                    "lineWidth": 1,
+                    "scaleDistribution": {"type": "linear"},
+                },
+                "links": [
+                    {
+                        "targetBlank": False,
+                        "title": "Open ticker detail",
+                        "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}",
+                    }
+                ],
+                "mappings": [],
+                "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
+            },
+            "overrides": overrides or [],
+        },
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": panel_id,
+        "options": {
+            "barRadius": 0,
+            "barWidth": 0.9,
+            "colorByField": color_by_field,
+            "fullHighlight": False,
+            "groupWidth": 0.8,
+            "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True},
+            "orientation": "vertical",
+            "showValue": "auto",
+            "stacking": "none",
+            "tooltip": {"mode": "single", "sort": "none"},
+            "xField": x_field,
+            "xTickLabelMaxLength": 12,
+            "xTickLabelRotation": 45,
+            "xTickLabelSpacing": 0,
+        },
+        "targets": [
+            {
+                "datasource": DATASOURCE,
+                "editorMode": "code",
+                "format": "table",
+                "rawQuery": True,
+                "rawSql": sql,
+                "refId": "A",
+            }
+        ],
+        "title": title,
+        "type": "barchart",
     }
 
 
@@ -327,13 +436,136 @@ def stock_overview_dashboard() -> dict:
     return dashboard
 
 
+def leaderboard_return_sql(interval_literal: str, limit: int, include_color_code: bool = True) -> str:
+    color_select = (
+        ",\n"
+        "    CASE\n"
+        "        WHEN return_pct >= 0 AND MOD(side_rank, 2) = 1 THEN 1\n"
+        "        WHEN return_pct >= 0 THEN 2\n"
+        "        WHEN MOD(side_rank, 2) = 1 THEN 3\n"
+        "        ELSE 4\n"
+        "    END AS bar_color_code\n"
+        if include_color_code
+        else "\n"
+    )
+    return (
+        "WITH latest_prices AS (\n"
+        "    SELECT DISTINCT ON (symbol)\n"
+        "        symbol,\n"
+        "        timestamp AS latest_timestamp,\n"
+        "        close AS latest_close\n"
+        "    FROM stock_prices\n"
+        "    ORDER BY symbol, timestamp DESC\n"
+        "), prior_prices AS (\n"
+        "    SELECT\n"
+        "        lp.symbol,\n"
+        "        prior.close AS prior_close\n"
+        "    FROM latest_prices lp\n"
+        "    JOIN LATERAL (\n"
+        "        SELECT close\n"
+        "        FROM stock_prices\n"
+        f"        WHERE symbol = lp.symbol AND timestamp <= lp.latest_timestamp - INTERVAL '{interval_literal}'\n"
+        "        ORDER BY timestamp DESC\n"
+        "        LIMIT 1\n"
+        "    ) prior ON TRUE\n"
+        "), returns AS (\n"
+        "    SELECT\n"
+        "        lp.symbol,\n"
+        "        COALESCE(t.name, lp.symbol) AS company_name,\n"
+        "        ((lp.latest_close - pp.prior_close) / pp.prior_close) * 100 AS return_pct\n"
+        "    FROM latest_prices lp\n"
+        "    JOIN prior_prices pp ON pp.symbol = lp.symbol\n"
+        "    LEFT JOIN tickers t ON t.symbol = lp.symbol\n"
+        "    WHERE pp.prior_close IS NOT NULL AND pp.prior_close <> 0\n"
+        "), ranked AS (\n"
+        "    SELECT\n"
+        "        symbol,\n"
+        "        company_name,\n"
+        "        return_pct,\n"
+        "        CASE WHEN return_pct >= 0 THEN 0 ELSE 1 END AS sort_bucket,\n"
+        "        ROW_NUMBER() OVER (\n"
+        "            PARTITION BY CASE WHEN return_pct >= 0 THEN 'positive' ELSE 'negative' END\n"
+        "            ORDER BY CASE WHEN return_pct >= 0 THEN return_pct END DESC,\n"
+        "                     CASE WHEN return_pct < 0 THEN return_pct END ASC,\n"
+        "                     symbol\n"
+        "        ) AS side_rank\n"
+        "    FROM returns\n"
+        ")\n"
+        "SELECT\n"
+        "    symbol AS ticker,\n"
+        "    company_name,\n"
+        "    CASE WHEN return_pct >= 0 THEN return_pct END AS \"Positive Change %\",\n"
+        "    CASE WHEN return_pct < 0 THEN return_pct END AS \"Negative Change %\""
+        + color_select
+        + "FROM ranked\n"
+        + f"WHERE side_rank <= {limit}\n"
+        "ORDER BY sort_bucket, ABS(return_pct) DESC, ticker"
+    )
+
+
+def leaderboard_52w_low_sql(limit: int, include_color_code: bool = True) -> str:
+    color_select = (
+        ",\n"
+        "    CASE WHEN MOD(display_rank, 2) = 1 THEN 1 ELSE 2 END AS bar_color_code\n"
+        if include_color_code
+        else "\n"
+    )
+    return (
+        "WITH latest_prices AS (\n"
+        "    SELECT DISTINCT ON (symbol)\n"
+        "        symbol,\n"
+        "        close AS latest_close\n"
+        "    FROM stock_prices\n"
+        "    ORDER BY symbol, timestamp DESC\n"
+        "), yearly_range AS (\n"
+        "    SELECT\n"
+        "        symbol,\n"
+        "        MIN(low) AS low_52w\n"
+        "    FROM stock_prices\n"
+        "    WHERE timestamp >= NOW() - INTERVAL '52 weeks'\n"
+        "    GROUP BY symbol\n"
+        "), ranked AS (\n"
+        "    SELECT\n"
+        "        lp.symbol AS ticker,\n"
+        "        COALESCE(t.name, lp.symbol) AS company_name,\n"
+        "        ((lp.latest_close - yr.low_52w) / yr.low_52w) * 100 AS pct_above_52w_low,\n"
+        "        ROW_NUMBER() OVER (\n"
+        "            ORDER BY ((lp.latest_close - yr.low_52w) / yr.low_52w) * 100 ASC, lp.symbol\n"
+        "        ) AS display_rank\n"
+        "    FROM latest_prices lp\n"
+        "    JOIN yearly_range yr ON yr.symbol = lp.symbol\n"
+        "    LEFT JOIN tickers t ON t.symbol = lp.symbol\n"
+        "    WHERE yr.low_52w IS NOT NULL AND yr.low_52w <> 0\n"
+        ")\n"
+        "SELECT\n"
+        "    ticker,\n"
+        "    company_name,\n"
+        "    pct_above_52w_low AS \"% Above 52W Low\""
+        + color_select
+        + "FROM ranked\n"
+        + "ORDER BY pct_above_52w_low ASC, ticker\n"
+        f"LIMIT {limit}"
+    )
+
+
 def ticker_detail_dashboard() -> dict:
     dashboard = base_dashboard(
         "S&P 500 Ticker Detail",
         "sp500-ticker-detail",
         ["sp500", "ticker", "generated"],
     )
-    dashboard["time"] = {"from": "now-3y", "to": "now"}
+    dashboard["links"] = [
+        {
+            "asDropdown": False,
+            "icon": "dashboard",
+            "includeVars": False,
+            "keepTime": False,
+            "targetBlank": False,
+            "title": "Leaderboards",
+            "type": "link",
+            "url": "/d/sp500-leaderboards/sandp-500-leaderboards",
+        }
+    ]
     dashboard["templating"] = {
         "list": [
             query_variable(
@@ -363,11 +595,12 @@ def ticker_detail_dashboard() -> dict:
         ")\n"
     )
     dashboard["panels"] = [
-        stat_panel(
+        table_panel(
             panel_id=1,
-            title="Ticker",
+            title="Company",
             sql=(
-                "SELECT COALESCE(name || ' (' || symbol || ')', symbol) AS value\n"
+                "SELECT '<div style=\"color:#4c78a8;font-size:26px;font-weight:600;text-align:center;line-height:1.2;\">' "
+                "|| COALESCE(name, symbol) || '</div>' AS company\n"
                 "FROM tickers\n"
                 "WHERE symbol = '${ticker}'"
             ),
@@ -375,6 +608,7 @@ def ticker_detail_dashboard() -> dict:
             y=0,
             w=6,
             h=4,
+            show_header=False,
         ),
         stat_panel(
             panel_id=2,
@@ -463,25 +697,27 @@ def ticker_detail_dashboard() -> dict:
             unit="percent",
             decimals=2,
         ),
-        timeseries_panel(
-            panel_id=7,
-            title="Close Price (3 Years)",
-            sql=(
-                "SELECT timestamp AS time, close AS \"Close Price\"\n"
-                "FROM stock_prices\n"
-                "WHERE symbol = '${ticker}'\n"
-                "AND timestamp >= NOW() - INTERVAL '3 years'\n"
-                "AND $__timeFilter(timestamp)\n"
-                "ORDER BY timestamp"
+        apply_timeseries_color(
+            timeseries_panel(
+                panel_id=7,
+                title="Close Price",
+                sql=(
+                    "SELECT timestamp AS time, close AS \"Close Price\"\n"
+                    "FROM stock_prices\n"
+                    "WHERE symbol = '${ticker}'\n"
+                    "AND $__timeFilter(timestamp)\n"
+                    "ORDER BY timestamp"
+                ),
+                x=0,
+                y=4,
+                w=24,
+                h=10,
+                unit="currencyUSD",
+                draw_style="line",
+                fill_opacity=18,
+                line_width=2,
             ),
-            x=0,
-            y=4,
-            w=24,
-            h=10,
-            unit="currencyUSD",
-            draw_style="line",
-            fill_opacity=10,
-            line_width=2,
+            "semi-dark-green",
         ),
         table_panel(
             panel_id=8,
@@ -495,6 +731,224 @@ def ticker_detail_dashboard() -> dict:
             y=14,
             w=24,
             h=6,
+        ),
+    ]
+    for panel in dashboard["panels"]:
+        if panel["type"] == "stat":
+            panel["fieldConfig"]["defaults"]["color"] = {"mode": "fixed", "fixedColor": "dark-green"}
+            panel["fieldConfig"]["defaults"]["thresholds"] = {
+                "mode": "absolute",
+                "steps": [
+                    {"color": "dark-blue", "value": None},
+                    {"color": "dark-green", "value": 0},
+                ],
+            }
+            panel["options"]["colorMode"] = "background"
+            panel["options"]["graphMode"] = "none"
+        elif panel["type"] == "table":
+            panel["fieldConfig"]["defaults"]["thresholds"] = {
+                "mode": "absolute",
+                "steps": [{"color": "dark-blue", "value": None}],
+            }
+    for panel in dashboard["panels"]:
+        if panel["id"] == 1:
+            panel["fieldConfig"]["defaults"]["custom"]["align"] = "center"
+            panel["fieldConfig"]["defaults"]["custom"]["cellOptions"] = {"type": "markdown"}
+            panel["options"]["cellHeight"] = "lg"
+        elif panel["id"] == 5:
+            panel["fieldConfig"]["defaults"]["color"] = {"mode": "fixed", "fixedColor": "green"}
+            panel["fieldConfig"]["defaults"]["thresholds"] = {
+                "mode": "absolute",
+                "steps": [
+                    {"color": "dark-green", "value": None},
+                    {"color": "green", "value": 0},
+                ],
+            }
+        elif panel["id"] == 6:
+            panel["fieldConfig"]["defaults"]["color"] = {"mode": "fixed", "fixedColor": "red"}
+            panel["fieldConfig"]["defaults"]["thresholds"] = {
+                "mode": "absolute",
+                "steps": [
+                    {"color": "dark-red", "value": None},
+                    {"color": "red", "value": 0},
+                ],
+            }
+    return dashboard
+
+
+def leaderboard_dashboard() -> dict:
+    dashboard = base_dashboard(
+        "S&P 500 Leaderboards",
+        "sp500-leaderboards",
+        ["sp500", "leaderboards", "generated"],
+    )
+    dashboard["time"] = {"from": "now-3y", "to": "now"}
+    dashboard["panels"] = [
+        bar_chart_panel(
+            panel_id=1,
+            title="Top 50 Closest to 52-Week Low",
+            sql=leaderboard_52w_low_sql(50, include_color_code=True),
+            x=0,
+            y=0,
+            w=24,
+            h=10,
+            x_field="ticker",
+            color_by_field="bar_color_code",
+            overrides=[
+                {
+                    "matcher": {"id": "byName", "options": "company_name"},
+                    "properties": [{"id": "custom.hideFrom", "value": {"legend": True, "tooltip": False, "viz": True}}],
+                },
+                {
+                    "matcher": {"id": "byName", "options": "bar_color_code"},
+                    "properties": [
+                        {"id": "custom.hideFrom", "value": {"legend": True, "tooltip": True, "viz": True}},
+                        {
+                            "id": "mappings",
+                            "value": [
+                                {"type": "value", "options": {"1": {"text": "Dark Blue", "color": "dark-blue"}}},
+                                {"type": "value", "options": {"2": {"text": "Blue", "color": "blue"}}},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        ),
+        table_panel(
+            panel_id=11,
+            title="Top 50 Closest to 52-Week Low Links",
+            sql=leaderboard_52w_low_sql(50, include_color_code=False),
+            x=0,
+            y=10,
+            w=24,
+            h=8,
+            overrides=[ticker_link_override()],
+        ),
+        bar_chart_panel(
+            panel_id=2,
+            title="Top 20 Weekly Gainers and Losers",
+            sql=leaderboard_return_sql("7 days", 20, include_color_code=True),
+            x=0,
+            y=18,
+            w=24,
+            h=10,
+            x_field="ticker",
+            color_by_field="bar_color_code",
+            overrides=[
+                {
+                    "matcher": {"id": "byName", "options": "company_name"},
+                    "properties": [{"id": "custom.hideFrom", "value": {"legend": True, "tooltip": False, "viz": True}}],
+                },
+                {
+                    "matcher": {"id": "byName", "options": "bar_color_code"},
+                    "properties": [
+                        {"id": "custom.hideFrom", "value": {"legend": True, "tooltip": True, "viz": True}},
+                        {
+                            "id": "mappings",
+                            "value": [
+                                {"type": "value", "options": {"1": {"text": "Dark Green", "color": "dark-green"}}},
+                                {"type": "value", "options": {"2": {"text": "Green", "color": "green"}}},
+                                {"type": "value", "options": {"3": {"text": "Dark Red", "color": "dark-red"}}},
+                                {"type": "value", "options": {"4": {"text": "Red", "color": "red"}}},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        ),
+        table_panel(
+            panel_id=12,
+            title="Weekly Gainers and Losers Links",
+            sql=leaderboard_return_sql("7 days", 20, include_color_code=False),
+            x=0,
+            y=28,
+            w=24,
+            h=8,
+            overrides=[ticker_link_override()],
+        ),
+        bar_chart_panel(
+            panel_id=3,
+            title="Top 20 Monthly Gainers and Losers",
+            sql=leaderboard_return_sql("1 month", 20, include_color_code=True),
+            x=0,
+            y=36,
+            w=24,
+            h=10,
+            x_field="ticker",
+            color_by_field="bar_color_code",
+            overrides=[
+                {
+                    "matcher": {"id": "byName", "options": "company_name"},
+                    "properties": [{"id": "custom.hideFrom", "value": {"legend": True, "tooltip": False, "viz": True}}],
+                },
+                {
+                    "matcher": {"id": "byName", "options": "bar_color_code"},
+                    "properties": [
+                        {"id": "custom.hideFrom", "value": {"legend": True, "tooltip": True, "viz": True}},
+                        {
+                            "id": "mappings",
+                            "value": [
+                                {"type": "value", "options": {"1": {"text": "Dark Green", "color": "dark-green"}}},
+                                {"type": "value", "options": {"2": {"text": "Green", "color": "green"}}},
+                                {"type": "value", "options": {"3": {"text": "Dark Red", "color": "dark-red"}}},
+                                {"type": "value", "options": {"4": {"text": "Red", "color": "red"}}},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        ),
+        table_panel(
+            panel_id=13,
+            title="Monthly Gainers and Losers Links",
+            sql=leaderboard_return_sql("1 month", 20, include_color_code=False),
+            x=0,
+            y=46,
+            w=24,
+            h=8,
+            overrides=[ticker_link_override()],
+        ),
+        bar_chart_panel(
+            panel_id=4,
+            title="Top 20 Three-Month Gainers and Losers",
+            sql=leaderboard_return_sql("3 months", 20, include_color_code=True),
+            x=0,
+            y=54,
+            w=24,
+            h=10,
+            x_field="ticker",
+            color_by_field="bar_color_code",
+            overrides=[
+                {
+                    "matcher": {"id": "byName", "options": "company_name"},
+                    "properties": [{"id": "custom.hideFrom", "value": {"legend": True, "tooltip": False, "viz": True}}],
+                },
+                {
+                    "matcher": {"id": "byName", "options": "bar_color_code"},
+                    "properties": [
+                        {"id": "custom.hideFrom", "value": {"legend": True, "tooltip": True, "viz": True}},
+                        {
+                            "id": "mappings",
+                            "value": [
+                                {"type": "value", "options": {"1": {"text": "Dark Green", "color": "dark-green"}}},
+                                {"type": "value", "options": {"2": {"text": "Green", "color": "green"}}},
+                                {"type": "value", "options": {"3": {"text": "Dark Red", "color": "dark-red"}}},
+                                {"type": "value", "options": {"4": {"text": "Red", "color": "red"}}},
+                            ],
+                        },
+                    ],
+                },
+            ],
+        ),
+        table_panel(
+            panel_id=14,
+            title="Three-Month Gainers and Losers Links",
+            sql=leaderboard_return_sql("3 months", 20, include_color_code=False),
+            x=0,
+            y=64,
+            w=24,
+            h=8,
+            overrides=[ticker_link_override()],
         ),
     ]
     return dashboard
@@ -675,6 +1129,7 @@ def main() -> None:
     DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
     write_dashboard("sp500-ticker-detail.json", ticker_detail_dashboard())
     write_dashboard("sp500-stock-overview.json", stock_overview_dashboard())
+    write_dashboard("sp500-leaderboards.json", leaderboard_dashboard())
     write_dashboard("sp500-sector-overview.json", sector_overview_dashboard())
     write_dashboard("sp500-industry-overview.json", industry_overview_dashboard())
 

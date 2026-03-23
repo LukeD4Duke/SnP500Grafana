@@ -6,7 +6,18 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": false,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Leaderboards",
+      "type": "link",
+      "url": "/d/sp500-leaderboards/sandp-500-leaderboards"
+    }
+  ],
   "liveNow": false,
   "panels": [
     {
@@ -16,20 +27,23 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
+          "custom": {
+            "align": "center",
+            "cellOptions": {
+              "type": "markdown"
+            },
+            "inspect": false
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-blue",
                 "value": null
               }
             ]
-          },
-          "unit": "none"
+          }
         },
         "overrides": []
       },
@@ -41,21 +55,11 @@
       },
       "id": 1,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "cellHeight": "lg",
+        "footer": {
+          "show": false
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "showHeader": false
       },
       "targets": [
         {
@@ -66,12 +70,12 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(name || ' (' || symbol || ')', symbol) AS value\nFROM tickers\nWHERE symbol = '${ticker}'",
+          "rawSql": "SELECT '<div style=\"color:#4c78a8;font-size:26px;font-weight:600;text-align:center;line-height:1.2;\">' || COALESCE(name, symbol) || '</div>' AS company\nFROM tickers\nWHERE symbol = '${ticker}'",
           "refId": "A"
         }
       ],
-      "title": "Ticker",
-      "type": "stat"
+      "title": "Company",
+      "type": "table"
     },
     {
       "datasource": {
@@ -81,15 +85,20 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "dark-green"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-blue",
                 "value": null
+              },
+              {
+                "color": "dark-green",
+                "value": 0
               }
             ]
           },
@@ -106,7 +115,7 @@
       },
       "id": 2,
       "options": {
-        "colorMode": "value",
+        "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -146,15 +155,20 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "dark-green"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-blue",
                 "value": null
+              },
+              {
+                "color": "dark-green",
+                "value": 0
               }
             ]
           },
@@ -171,7 +185,7 @@
       },
       "id": 3,
       "options": {
-        "colorMode": "value",
+        "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -211,15 +225,20 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "dark-green"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-blue",
                 "value": null
+              },
+              {
+                "color": "dark-green",
+                "value": 0
               }
             ]
           },
@@ -236,7 +255,7 @@
       },
       "id": 4,
       "options": {
-        "colorMode": "value",
+        "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -276,15 +295,20 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "green"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-green",
                 "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
               }
             ]
           },
@@ -301,7 +325,7 @@
       },
       "id": 5,
       "options": {
-        "colorMode": "value",
+        "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -341,15 +365,20 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "fixed",
+            "fixedColor": "red"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-red",
                 "value": null
+              },
+              {
+                "color": "red",
+                "value": 0
               }
             ]
           },
@@ -366,7 +395,7 @@
       },
       "id": 6,
       "options": {
-        "colorMode": "value",
+        "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
@@ -406,7 +435,8 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "fixed",
+            "fixedColor": "semi-dark-green"
           },
           "custom": {
             "axisCenteredZero": false,
@@ -415,7 +445,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 18,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -479,11 +509,11 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT timestamp AS time, close AS \"Close Price\"\nFROM stock_prices\nWHERE symbol = '${ticker}'\nAND timestamp >= NOW() - INTERVAL '3 years'\nAND $__timeFilter(timestamp)\nORDER BY timestamp",
+          "rawSql": "SELECT timestamp AS time, close AS \"Close Price\"\nFROM stock_prices\nWHERE symbol = '${ticker}'\nAND $__timeFilter(timestamp)\nORDER BY timestamp",
           "refId": "A"
         }
       ],
-      "title": "Close Price (3 Years)",
+      "title": "Close Price",
       "type": "timeseries"
     },
     {
@@ -505,7 +535,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "dark-blue",
                 "value": null
               }
             ]
@@ -553,7 +583,7 @@
     "generated"
   ],
   "time": {
-    "from": "now-3y",
+    "from": "now-1y",
     "to": "now"
   },
   "timepicker": {},

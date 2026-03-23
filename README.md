@@ -63,6 +63,7 @@ Generated dashboards:
 
 - `S&P 500 Ticker Detail`
 - `S&P 500 Stock Overview`
+- `S&P 500 Leaderboards`
 - `S&P 500 Sector Overview`
 - `S&P 500 Industry Overview`
 
