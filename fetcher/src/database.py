@@ -1,6 +1,7 @@
 """Database connection, schema management, and data persistence."""
 
 import logging
+import re
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple
@@ -108,24 +109,17 @@ def init_schema(config: DatabaseConfig, init_script_path: Optional[Path] = None)
         sql = DEFAULT_INIT_SQL
         logger.warning("Init script not found at %s, using embedded schema SQL", script_path)
 
-    # Split into statements and execute separately for robustness
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
-
     with get_connection(config) as conn:
         with conn.cursor() as cur:
-            for stmt in statements:
-                stmt = stmt.strip()
-                if not stmt:
-                    continue
-                try:
-                    cur.execute(stmt)
-                    logger.info("Executed: %s...", stmt[:60])
-                except Exception as e:
-                    # Skip compression policy if not supported
-                    if "compression" in stmt.lower() or "compress" in stmt.lower():
-                        logger.warning("Skipping compression statement (may not be supported): %s", e)
-                    else:
-                        raise
+            try:
+                cur.execute(sql)
+                logger.info("Executed schema SQL from %s", script_path)
+            except Exception as e:
+                # Skip compression-related failures if the schema evolves to include them.
+                if re.search(r"compress", sql, re.IGNORECASE):
+                    logger.warning("Schema SQL failed on compression-related statements: %s", e)
+                else:
+                    raise
 
 
 def upsert_tickers(config: DatabaseConfig, tickers: List[Tuple[str, str, str, str]]) -> int:

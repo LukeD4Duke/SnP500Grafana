@@ -27,6 +27,7 @@
 
 3. Set required variables in `.env`:
    - `DB_PASSWORD` - PostgreSQL/TimescaleDB password
+   - `GRAFANA_ADMIN_USER` - optional Grafana admin username, defaults to `admin`
    - `GRAFANA_ADMIN_PASSWORD` - Grafana admin password
    - Optional Grafana overrides if you need remote access:
      - `GRAFANA_BIND_IP` - defaults to `127.0.0.1`
@@ -84,6 +85,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DB_PASSWORD` | *(required)* | Database password |
+| `GRAFANA_ADMIN_USER` | `admin` | Grafana admin username |
 | `GRAFANA_ADMIN_PASSWORD` | *(required)* | Grafana admin password |
 | `GRAFANA_BIND_IP` | `127.0.0.1` | Host IP for published Grafana port |
 | `GRAFANA_PORT` | `3001` | Published host port for Grafana |
@@ -94,6 +96,8 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `UPDATE_CRON` | `0 23 * * *` | Cron: daily at 11 PM UTC (6 PM ET) |
 | `YFINANCE_CHUNK_SIZE` | `50` | Tickers per batch (rate limit mitigation) |
 | `YFINANCE_DELAY_SEC` | `2.5` | Delay between batches (seconds) |
+| `YFINANCE_MAX_RETRIES` | `5` | Retry attempts per ticker chunk when Yahoo rate-limits requests |
+| `YFINANCE_RETRY_DELAY` | `60` | Base retry delay in seconds before exponential backoff is applied |
 | `HISTORICAL_START` | `2020-01-01` | Start date for initial historical load |
 | `BACKFILL_START` | *(unset)* | Optional one-time startup backfill start date for older history on a populated database |
 

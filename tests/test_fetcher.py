@@ -13,6 +13,7 @@ class FetchHistoricalDataTests(unittest.TestCase):
             chunk_size=2,
             delay_seconds=0,
             historical_start="2020-01-01",
+            backfill_start=None,
             update_cron="0 23 * * *",
             max_retries=3,
             retry_delay_seconds=0,
@@ -61,6 +62,31 @@ class FetchHistoricalDataTests(unittest.TestCase):
                 fetch_historical_data(["AAA"], start="2024-01-01", config=self.config)
 
         self.assertEqual(fetch_chunk.call_count, 1)
+
+    def test_default_config_path_does_not_raise_type_error(self):
+        successful_df = pd.DataFrame(
+            [
+                {
+                    "Symbol": "AAA",
+                    "Date": pd.Timestamp("2024-01-02"),
+                    "Open": 1.0,
+                    "High": 1.5,
+                    "Low": 0.5,
+                    "Close": 1.2,
+                    "Volume": 100,
+                    "Dividends": 0.0,
+                    "Stock Splits": 0.0,
+                }
+            ]
+        )
+
+        with mock.patch("fetcher.src.fetcher._fetch_chunk", return_value=successful_df) as fetch_chunk, \
+             mock.patch("fetcher.src.fetcher.time.sleep"):
+            result = fetch_historical_data(["AAA"], start="2024-01-01", config=None)
+
+        self.assertEqual(fetch_chunk.call_count, 1)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["Symbol"], "AAA")
 
 
 if __name__ == "__main__":

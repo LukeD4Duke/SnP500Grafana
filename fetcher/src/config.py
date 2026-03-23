@@ -36,10 +36,10 @@ class FetcherConfig:
     chunk_size: int
     delay_seconds: float
     historical_start: str
-    backfill_start: Optional[str]
     update_cron: str
     max_retries: int
     retry_delay_seconds: float
+    backfill_start: Optional[str] = None
 
 
 def get_database_config() -> DatabaseConfig:

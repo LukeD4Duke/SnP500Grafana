@@ -146,6 +146,7 @@ def fetch_historical_data(
         chunk_size=50,
         delay_seconds=2.5,
         historical_start="2020-01-01",
+        backfill_start=None,
         update_cron="0 23 * * *",
         max_retries=5,
         retry_delay_seconds=60,
