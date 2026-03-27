@@ -2,6 +2,8 @@
 yfinance>=0.2.36
 lxml>=5.0.0
 pandas>=2.0.0
+pandas-ta>=0.3.14b0
+TA-Lib>=0.6.3
 psycopg2-binary>=2.9.9
 apscheduler>=3.10.0
 requests>=2.31.0

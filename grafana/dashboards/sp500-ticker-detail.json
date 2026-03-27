@@ -16,6 +16,16 @@
       "title": "Leaderboards",
       "type": "link",
       "url": "/d/sp500-leaderboards/sandp-500-leaderboards"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Technical Indicators",
+      "type": "link",
+      "url": "/d/sp500-indicators/sandp-500-technical-indicators"
     }
   ],
   "liveNow": false,

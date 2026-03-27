@@ -3,8 +3,9 @@
 import io
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import pandas as pd
 import requests
@@ -32,6 +33,21 @@ WIKIPEDIA_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
 WIKIPEDIA_HEADERS = {
     "User-Agent": "StockAnalysisGrafana/1.0 (https://github.com/stock-analysis; data collection)",
 }
+
+
+@dataclass(frozen=True)
+class FetchResult:
+    """Historical fetch result including partial-failure metadata."""
+
+    dataframe: pd.DataFrame
+    requested_symbols: list[str]
+    successful_symbols: list[str]
+    failed_symbols: list[str]
+    recovered_symbols: list[str]
+
+    @property
+    def partial_failure(self) -> bool:
+        return bool(self.failed_symbols)
 
 
 def fetch_sp500_tickers() -> List[Tuple[str, str, str, str]]:
@@ -132,18 +148,206 @@ def _fetch_chunk(
     return pd.DataFrame(records) if records else pd.DataFrame()
 
 
+def _extract_successful_symbols(df: pd.DataFrame) -> set[str]:
+    """Return symbols that produced at least one valid OHLCV row."""
+    if df.empty or "Symbol" not in df.columns:
+        return set()
+    return {str(symbol) for symbol in df["Symbol"].dropna().astype(str).unique().tolist()}
+
+
+def _concat_frames(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """Combine result frames into a deduplicated DataFrame."""
+    non_empty = [frame for frame in frames if not frame.empty]
+    if not non_empty:
+        return pd.DataFrame()
+    combined = pd.concat(non_empty, ignore_index=True)
+    return combined.drop_duplicates(subset=["Symbol", "Date"], keep="last")
+
+
+def _fetch_chunk_with_retries(
+    tickers: list[str],
+    start: str,
+    end: str,
+    config: FetcherConfig,
+    *,
+    context_label: str,
+) -> pd.DataFrame:
+    """Fetch a symbol set using chunk-level retry rules."""
+    for attempt in range(config.max_retries):
+        try:
+            return _fetch_chunk(tickers, start, end)
+        except Exception as exc:
+            is_rate_limit = _is_rate_limit_error(exc) or (
+                YFRateLimitError is not None and isinstance(exc, YFRateLimitError)
+            )
+            attempt_num = attempt + 1
+            total_attempts = config.max_retries
+            if is_rate_limit and attempt_num < total_attempts:
+                wait = config.retry_delay_seconds * (2 ** attempt)
+                logger.warning(
+                    "%s rate limited, retry %d/%d in %.0fs for symbols [%s]: %s",
+                    context_label,
+                    attempt_num,
+                    total_attempts,
+                    wait,
+                    ", ".join(tickers),
+                    str(exc),
+                )
+                time.sleep(wait)
+                continue
+            if is_rate_limit:
+                logger.error(
+                    "%s exhausted chunk retries after %d/%d attempts for symbols [%s]: %s",
+                    context_label,
+                    attempt_num,
+                    total_attempts,
+                    ", ".join(tickers),
+                    str(exc),
+                )
+            else:
+                logger.error(
+                    "%s hard failure for symbols [%s]: %s",
+                    context_label,
+                    ", ".join(tickers),
+                    str(exc),
+                )
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+def _recover_symbol_batch(
+    tickers: list[str],
+    start: str,
+    end: str,
+    config: FetcherConfig,
+    *,
+    context_label: str,
+) -> tuple[pd.DataFrame, set[str]]:
+    """Retry a reduced symbol batch with symbol-level retry logic."""
+    total_attempts = max(config.symbol_retry_count + 1, 1)
+    for attempt in range(total_attempts):
+        try:
+            df = _fetch_chunk(tickers, start, end)
+        except Exception as exc:
+            attempt_num = attempt + 1
+            if attempt_num >= total_attempts:
+                logger.warning(
+                    "%s exhausted symbol retries for [%s]: %s",
+                    context_label,
+                    ", ".join(tickers),
+                    str(exc),
+                )
+                return pd.DataFrame(), set()
+            wait = config.retry_delay_seconds * (2 ** attempt)
+            logger.warning(
+                "%s retry %d/%d in %.0fs for symbols [%s]: %s",
+                context_label,
+                attempt_num,
+                total_attempts,
+                wait,
+                ", ".join(tickers),
+                str(exc),
+            )
+            time.sleep(wait)
+            continue
+
+        successful_symbols = _extract_successful_symbols(df)
+        if successful_symbols:
+            return df, successful_symbols
+
+        attempt_num = attempt + 1
+        if attempt_num >= total_attempts:
+            logger.warning("%s returned no rows for symbols [%s]", context_label, ", ".join(tickers))
+            return pd.DataFrame(), set()
+        wait = config.retry_delay_seconds * (2 ** attempt)
+        logger.warning(
+            "%s returned no rows, retry %d/%d in %.0fs for symbols [%s]",
+            context_label,
+            attempt_num,
+            total_attempts,
+            wait,
+            ", ".join(tickers),
+        )
+        time.sleep(wait)
+
+    return pd.DataFrame(), set()
+
+
+def _recover_missing_symbols(
+    missing_symbols: set[str],
+    start: str,
+    end: str,
+    config: FetcherConfig,
+    *,
+    chunk_num: int,
+    total_chunks: int,
+) -> tuple[pd.DataFrame, set[str], set[str]]:
+    """Recover missing symbols using smaller batches and single-symbol retries."""
+    if not missing_symbols:
+        return pd.DataFrame(), set(), set()
+
+    recovered_frames: list[pd.DataFrame] = []
+    recovered_symbols: set[str] = set()
+    unresolved_symbols: set[str] = set()
+    symbols = sorted(missing_symbols)
+    batch_size = max(config.recovery_chunk_size, 1)
+
+    logger.warning(
+        "Chunk %d/%d partial success: retrying %d missing symbols in recovery batches of %d",
+        chunk_num,
+        total_chunks,
+        len(symbols),
+        batch_size,
+    )
+
+    for batch_index in range(0, len(symbols), batch_size):
+        batch = symbols[batch_index : batch_index + batch_size]
+        batch_label = f"Recovery batch {chunk_num}/{total_chunks}"
+        batch_df, batch_success = _recover_symbol_batch(
+            batch,
+            start,
+            end,
+            config,
+            context_label=batch_label,
+        )
+        if not batch_df.empty:
+            recovered_frames.append(batch_df)
+        recovered_symbols.update(batch_success)
+
+        still_missing = [symbol for symbol in batch if symbol not in batch_success]
+        for symbol in still_missing:
+            symbol_df, symbol_success = _recover_symbol_batch(
+                [symbol],
+                start,
+                end,
+                config,
+                context_label=f"Single-symbol recovery {chunk_num}/{total_chunks}",
+            )
+            if not symbol_df.empty:
+                recovered_frames.append(symbol_df)
+            if symbol_success:
+                recovered_symbols.update(symbol_success)
+            else:
+                unresolved_symbols.add(symbol)
+
+    return _concat_frames(recovered_frames), recovered_symbols, unresolved_symbols
+
+
 def fetch_historical_data(
     tickers: List[str],
     start: str,
     end: Optional[str] = None,
     config: Optional[FetcherConfig] = None,
-) -> pd.DataFrame:
+) -> FetchResult:
     """
     Fetch historical OHLCV data in chunks with rate limiting and retries.
-    Returns DataFrame with columns: Symbol, Date, Open, High, Low, Close, Volume, Dividends, Stock Splits.
+    Returns rows plus metadata about recovered and failed symbols.
     """
     config = config or FetcherConfig(
         chunk_size=50,
+        symbol_retry_count=2,
+        recovery_chunk_size=5,
+        failed_symbol_log_limit=20,
         delay_seconds=2.5,
         historical_start="2020-01-01",
         backfill_start=None,
@@ -153,7 +357,10 @@ def fetch_historical_data(
     )
     end = end or datetime.now().strftime("%Y-%m-%d")
 
-    all_records = []
+    all_records: list[pd.DataFrame] = []
+    successful_symbols: set[str] = set()
+    failed_symbols: set[str] = set()
+    recovered_symbols: set[str] = set()
     chunks = [
         tickers[i : i + config.chunk_size]
         for i in range(0, len(tickers), config.chunk_size)
@@ -170,70 +377,70 @@ def fetch_historical_data(
             start,
             end,
         )
-        for attempt in range(config.max_retries):
-            try:
-                df = _fetch_chunk(chunk, start, end)
-                if not df.empty:
-                    min_date = df["Date"].min()
-                    max_date = df["Date"].max()
-                    logger.info(
-                        "Fetched chunk %d/%d with %d rows spanning %s to %s",
-                        chunk_num,
-                        len(chunks),
-                        len(df),
-                        min_date.date().isoformat() if hasattr(min_date, "date") else str(min_date),
-                        max_date.date().isoformat() if hasattr(max_date, "date") else str(max_date),
-                    )
-                    all_records.append(df)
-                else:
-                    logger.warning(
-                        "Fetched chunk %d/%d but received no rows for symbols [%s]",
-                        chunk_num,
-                        len(chunks),
-                        chunk_symbols,
-                    )
-                break
-            except Exception as e:
-                is_rate_limit = _is_rate_limit_error(e) or (
-                    YFRateLimitError is not None and isinstance(e, YFRateLimitError)
-                )
-                if is_rate_limit:
-                    attempt_num = attempt + 1
-                    total_attempts = config.max_retries
-                    wait = config.retry_delay_seconds * (2 ** attempt)
-                    if attempt_num >= total_attempts:
-                        logger.error(
-                            "Rate limited (chunk %d/%d) exhausted after %d/%d retries for symbols [%s]: %s",
-                            chunk_num,
-                            len(chunks),
-                            attempt_num,
-                            total_attempts,
-                            chunk_symbols,
-                            str(e),
-                        )
-                        raise RuntimeError(
-                            "Rate limit retries exhausted for chunk "
-                            f"{chunk_num}/{len(chunks)} with symbols [{chunk_symbols}]"
-                        ) from e
-                    logger.warning(
-                        "Rate limited (chunk %d/%d), retry %d/%d in %.0fs: %s",
-                        chunk_num,
-                        len(chunks),
-                        attempt_num,
-                        total_attempts,
-                        wait,
-                        str(e),
-                    )
-                    time.sleep(wait)
-                else:
-                    logger.error("Chunk %d/%d failed: %s", chunk_num, len(chunks), str(e))
-                    raise
+        df = _fetch_chunk_with_retries(
+            chunk,
+            start,
+            end,
+            config,
+            context_label=f"Chunk {chunk_num}/{len(chunks)}",
+        )
+        chunk_success = _extract_successful_symbols(df)
+        missing_symbols = set(chunk) - chunk_success
+
+        if not df.empty:
+            min_date = df["Date"].min()
+            max_date = df["Date"].max()
+            logger.info(
+                "Fetched chunk %d/%d with %d rows spanning %s to %s",
+                chunk_num,
+                len(chunks),
+                len(df),
+                min_date.date().isoformat() if hasattr(min_date, "date") else str(min_date),
+                max_date.date().isoformat() if hasattr(max_date, "date") else str(max_date),
+            )
+            all_records.append(df)
+        else:
+            logger.warning(
+                "Chunk %d/%d returned no rows for symbols [%s]",
+                chunk_num,
+                len(chunks),
+                chunk_symbols,
+            )
+
+        if missing_symbols and chunk_success:
+            logger.warning(
+                "Chunk %d/%d partial success: %d/%d symbols returned; missing [%s]",
+                chunk_num,
+                len(chunks),
+                len(chunk_success),
+                len(chunk),
+                ", ".join(sorted(missing_symbols)),
+            )
+
+        recovered_df, recovered_chunk_symbols, unresolved_symbols = _recover_missing_symbols(
+            missing_symbols,
+            start,
+            end,
+            config,
+            chunk_num=chunk_num,
+            total_chunks=len(chunks),
+        )
+        if not recovered_df.empty:
+            all_records.append(recovered_df)
+        recovered_symbols.update(recovered_chunk_symbols)
+        successful_symbols.update(chunk_success)
+        successful_symbols.update(recovered_chunk_symbols)
+        failed_symbols.update(unresolved_symbols)
 
         if i < len(chunks) - 1:
             time.sleep(config.delay_seconds)
 
-    if not all_records:
-        return pd.DataFrame()
-
-    combined = pd.concat(all_records, ignore_index=True)
-    return combined
+    failed_symbols.difference_update(successful_symbols)
+    combined = _concat_frames(all_records)
+    return FetchResult(
+        dataframe=combined,
+        requested_symbols=list(tickers),
+        successful_symbols=sorted(successful_symbols),
+        failed_symbols=sorted(failed_symbols),
+        recovered_symbols=sorted(recovered_symbols),
+    )

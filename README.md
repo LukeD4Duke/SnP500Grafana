@@ -2,13 +2,13 @@
 
 ## Quick Description
 
-**SnP500Grafana** is a containerized application that collects S&P 500 stock market data and visualizes it in Grafana. It pulls OHLCV (Open, High, Low, Close, Volume) price data from Yahoo Finance, stores it in TimescaleDB (time-series optimized PostgreSQL), and provides generated dashboards for ticker, sector, and industry analysis. The fetcher performs a full historical load only when the database is empty and schedules incremental updates after the US market close.
+**SnP500Grafana** is a containerized application that collects S&P 500 stock market data and visualizes it in Grafana. It pulls OHLCV (Open, High, Low, Close, Volume) price data from Yahoo Finance, stores it in TimescaleDB (time-series optimized PostgreSQL), and provides generated dashboards for ticker, sector, industry, and technical-indicator analysis. The fetcher performs a full historical load only when the database is empty and schedules incremental updates after the US market close.
 
 ## Architecture
 
 - **TimescaleDB**: time-series optimized PostgreSQL for stock prices
 - **stock-fetcher**: Python service that fetches data from Wikipedia (ticker list) and Yahoo Finance (OHLCV), with retries and cached-symbol fallback
-- **Grafana**: custom image with baked-in datasource provisioning and generated dashboards driven by ticker metadata
+- **Grafana**: custom image with baked-in datasource provisioning and generated dashboards driven by ticker metadata and derived indicator series
 
 ## Prerequisites
 
@@ -65,8 +65,39 @@ Generated dashboards:
 - `S&P 500 Ticker Detail`
 - `S&P 500 Stock Overview`
 - `S&P 500 Leaderboards`
+- `S&P 500 Technical Indicators`
 - `S&P 500 Sector Overview`
 - `S&P 500 Industry Overview`
+
+## Technical Indicators
+
+The indicator pipeline derives technical studies from the stored daily OHLCV bars and persists the results so Grafana can query them directly. The fetcher image now bundles both `pandas-ta` and the native TA-Lib library, so TA-Lib-backed studies are available in-container instead of being skipped.
+
+The indicator dashboard combines:
+
+- the underlying ticker price series
+- the selected indicator time series
+- catalog metadata for the chosen indicator
+- a latest-value snapshot across the available indicators for the selected ticker
+
+Indicator-related runtime settings:
+
+- `INDICATORS_ENABLED` enables or disables indicator refreshes entirely
+- `INDICATOR_REBUILD_ON_STARTUP` forces a full persisted-indicator rebuild for all symbols on container start
+- `INDICATOR_BATCH_SIZE` controls how many symbols are processed per refresh batch
+
+## Fetch Hardening
+
+Yahoo Finance can partially fail within a multi-symbol request: one symbol may come back missing or malformed while the rest of the chunk succeeds. The fetcher now detects that condition, preserves the successful rows, retries only the missing symbols in smaller recovery batches, and finally falls back to one-symbol retries before marking a symbol as failed for that run.
+
+Runs remain non-fatal by default when only a subset of symbols fail. The fetcher logs a structured summary after each sync and warns explicitly about any symbols that still failed after targeted retries.
+
+Example warning shape:
+
+```text
+Fetch summary: requested=503 succeeded=502 recovered=1 failed=1
+Permanently failed symbols after targeted retries: EXR
+```
 
 ## Deployment via Portainer
 
@@ -95,11 +126,17 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `DB_USER` | `postgres` | Database user |
 | `UPDATE_CRON` | `0 23 * * *` | Cron: daily at 11 PM UTC (6 PM ET) |
 | `YFINANCE_CHUNK_SIZE` | `50` | Tickers per batch (rate limit mitigation) |
+| `YFINANCE_SYMBOL_RETRIES` | `2` | Additional targeted retry attempts for missing symbols during recovery |
+| `YFINANCE_RECOVERY_CHUNK_SIZE` | `5` | Small-batch size used when retrying only missing symbols from a partial chunk |
+| `YFINANCE_FAILED_SYMBOL_LOG_LIMIT` | `20` | Maximum failed symbols to print in the final warning summary for a run |
 | `YFINANCE_DELAY_SEC` | `2.5` | Delay between batches (seconds) |
 | `YFINANCE_MAX_RETRIES` | `5` | Retry attempts per ticker chunk when Yahoo rate-limits requests |
 | `YFINANCE_RETRY_DELAY` | `60` | Base retry delay in seconds before exponential backoff is applied |
 | `HISTORICAL_START` | `2020-01-01` | Start date for initial historical load |
 | `BACKFILL_START` | *(unset)* | Optional one-time startup backfill start date for older history on a populated database |
+| `INDICATORS_ENABLED` | `true` | Enable persisted technical-indicator calculation after OHLCV syncs |
+| `INDICATOR_REBUILD_ON_STARTUP` | `false` | Recompute all persisted indicators for all symbols during startup |
+| `INDICATOR_BATCH_SIZE` | `25` | Number of symbols processed per indicator refresh batch |
 
 ## Services
 
@@ -115,7 +152,8 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 2. **Restart behavior**: On later restarts, the fetcher performs an incremental sync instead of replaying the full historical backfill.
 3. **Optional backfill**: If `BACKFILL_START` is set and the database already contains newer rows, the fetcher can backfill older history without clearing the database first.
 4. **Daily updates**: At the configured cron time, the fetcher reloads the last 7 days of data and upserts into the database.
-5. **Grafana**: Starts from a custom image that already contains the provisioned TimescaleDB datasource and generated dashboards that query `stock_prices` and `tickers`.
+5. **Indicator derivation**: After each OHLCV sync, derived indicators are computed from the stored bars and persisted for Grafana use.
+6. **Grafana**: Starts from a custom image that already contains the provisioned TimescaleDB datasource and generated dashboards that query `stock_prices`, `tickers`, and the derived indicator tables.
 
 ## Monitoring Backfill Progress
 
@@ -130,6 +168,8 @@ During a backfill, the fetcher logs:
 - the requested backfill window
 - each chunk number and ticker count
 - rows returned per chunk and the date span for that chunk
+- any partial-chunk recovery attempts for missing symbols
+- a final per-run fetch summary including recovered and permanently failed symbols
 - the final upsert count
 
 You can also inspect the stored date range directly in PostgreSQL:
@@ -144,6 +184,7 @@ FROM stock_prices;
 - `yfinance` is community-maintained and depends on Yahoo Finance. For production-critical deployments, consider paid APIs such as Polygon.io or Alpha Vantage.
 - Rate limiting still affects the initial load. Do not reduce chunk delays aggressively.
 - Dashboard generation requires a local Python environment.
+- TA-Lib is built into the fetcher image, which increases image build time compared with the pure-`pandas-ta` setup.
 
 ## License
 

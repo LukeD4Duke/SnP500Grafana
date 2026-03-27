@@ -1,10 +1,11 @@
 """Database connection, schema management, and data persistence."""
 
+import json
 import logging
 import re
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import psycopg2
 from psycopg2.extras import execute_values
@@ -44,7 +45,58 @@ SELECT create_hypertable(
 );
 
 CREATE INDEX IF NOT EXISTS idx_stock_prices_symbol ON stock_prices (symbol, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS indicator_catalog (
+    indicator_key TEXT PRIMARY KEY,
+    indicator TEXT NOT NULL,
+    output_name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    source_library VARCHAR(32) NOT NULL,
+    default_params JSONB NOT NULL DEFAULT '{}'::jsonb,
+    warmup_periods INTEGER NOT NULL DEFAULT 0,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS stock_indicators (
+    symbol VARCHAR(10) NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
+    indicator_key TEXT NOT NULL REFERENCES indicator_catalog (indicator_key) ON DELETE CASCADE,
+    value_numeric DOUBLE PRECISION,
+    computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (symbol, timestamp, indicator_key)
+);
+
+SELECT create_hypertable(
+    'stock_indicators',
+    'timestamp',
+    if_not_exists => TRUE,
+    chunk_time_interval => INTERVAL '1 month'
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_indicators_symbol_indicator_time
+    ON stock_indicators (symbol, indicator_key, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_stock_indicators_indicator_time
+    ON stock_indicators (indicator_key, timestamp DESC);
 """
+
+
+def _json_value(value: object) -> str:
+    """Return a JSON string without double-encoding existing JSON strings."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+def _decoded_json_value(value: object, default: object) -> object:
+    """Decode a JSON column while tolerating adapter-specific return types."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
 
 
 def resolve_init_script_path() -> Path:
@@ -168,6 +220,225 @@ def upsert_stock_prices(
             return cur.rowcount
 
 
+def upsert_indicator_catalog(
+    config: DatabaseConfig,
+    rows: List[Tuple[str, str, str, str, str, str, object, int, bool]],
+) -> int:
+    """Upsert indicator definitions into the catalog table."""
+    if not rows:
+        return 0
+
+    normalized_rows = [
+        (
+            indicator_key,
+            indicator,
+            output_name,
+            display_name,
+            category,
+            source_library,
+            _json_value(default_params),
+            warmup_periods,
+            is_enabled,
+        )
+        for (
+            indicator_key,
+            indicator,
+            output_name,
+            display_name,
+            category,
+            source_library,
+            default_params,
+            warmup_periods,
+            is_enabled,
+        ) in rows
+    ]
+
+    upsert_sql = """
+        INSERT INTO indicator_catalog (
+            indicator_key,
+            indicator,
+            output_name,
+            display_name,
+            category,
+            source_library,
+            default_params,
+            warmup_periods,
+            is_enabled
+        )
+        VALUES %s
+        ON CONFLICT (indicator_key) DO UPDATE SET
+            indicator = EXCLUDED.indicator,
+            output_name = EXCLUDED.output_name,
+            display_name = EXCLUDED.display_name,
+            category = EXCLUDED.category,
+            source_library = EXCLUDED.source_library,
+            default_params = EXCLUDED.default_params,
+            warmup_periods = EXCLUDED.warmup_periods,
+            is_enabled = EXCLUDED.is_enabled,
+            updated_at = NOW()
+    """
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            execute_values(cur, upsert_sql, normalized_rows, page_size=200)
+            return cur.rowcount
+
+
+def get_indicator_catalog(config: DatabaseConfig, only_enabled: bool = False) -> List[dict]:
+    """Fetch indicator catalog entries ordered by key."""
+    query = """
+        SELECT
+            indicator_key,
+            indicator,
+            output_name,
+            display_name,
+            category,
+            source_library,
+            default_params,
+            warmup_periods,
+            is_enabled,
+            updated_at
+        FROM indicator_catalog
+    """
+    params: Tuple[object, ...] = ()
+    if only_enabled:
+        query += " WHERE is_enabled = TRUE"
+    query += " ORDER BY indicator_key"
+
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+    catalog: List[dict] = []
+    for row in rows:
+        catalog.append(
+            {
+                "indicator_key": row[0],
+                "indicator": row[1],
+                "output_name": row[2],
+                "display_name": row[3],
+                "category": row[4],
+                "source_library": row[5],
+                "library": row[5],
+                "default_params": _decoded_json_value(row[6], {}),
+                "warmup_periods": row[7],
+                "is_enabled": row[8],
+                "updated_at": row[9],
+            }
+        )
+    return catalog
+
+
+def get_stock_price_history(
+    config: DatabaseConfig,
+    symbol: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[dict]:
+    """Fetch OHLCV history for a single symbol ordered by timestamp.
+
+    Returns a list of dictionaries that can be passed directly to pandas.DataFrame().
+    """
+    query = """
+        SELECT
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            dividends,
+            stock_splits
+        FROM stock_prices
+        WHERE symbol = %s
+    """
+    params: List[object] = [symbol]
+    if start_date is not None:
+        query += " AND timestamp >= %s"
+        params.append(start_date)
+    if end_date is not None:
+        query += " AND timestamp <= %s"
+        params.append(end_date)
+    query += " ORDER BY timestamp"
+
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description or ()]
+            return [dict(zip(columns, row)) for row in rows]
+
+
+def upsert_stock_indicators(
+    config: DatabaseConfig,
+    rows: List[Tuple[str, str, str, Optional[float]]],
+) -> int:
+    """Upsert indicator rows into the long-form storage table."""
+    if not rows:
+        return 0
+
+    normalized_rows = [
+        (
+            symbol,
+            timestamp,
+            indicator_key,
+            value_numeric,
+        )
+        for (symbol, timestamp, indicator_key, value_numeric) in rows
+    ]
+
+    upsert_sql = """
+        INSERT INTO stock_indicators (
+            symbol,
+            timestamp,
+            indicator_key,
+            value_numeric
+        )
+        VALUES %s
+        ON CONFLICT (symbol, timestamp, indicator_key) DO UPDATE SET
+            value_numeric = EXCLUDED.value_numeric,
+            computed_at = NOW()
+    """
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            execute_values(cur, upsert_sql, normalized_rows, page_size=500)
+            return cur.rowcount
+
+
+def delete_stock_indicators(
+    config: DatabaseConfig,
+    symbol: Optional[str] = None,
+    start_timestamp: Optional[str] = None,
+    end_timestamp: Optional[str] = None,
+    indicator_key: Optional[str] = None,
+) -> int:
+    """Delete indicator rows for a symbol/time window."""
+    query = "DELETE FROM stock_indicators"
+    conditions = []
+    params: List[object] = []
+
+    if symbol is not None:
+        conditions.append("symbol = %s")
+        params.append(symbol)
+    if start_timestamp is not None:
+        conditions.append("timestamp >= %s")
+        params.append(start_timestamp)
+    if end_timestamp is not None:
+        conditions.append("timestamp <= %s")
+        params.append(end_timestamp)
+    if indicator_key is not None:
+        conditions.append("indicator_key = %s")
+        params.append(indicator_key)
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            return cur.rowcount
+
+
 def get_last_date(config: DatabaseConfig, symbol: str) -> Optional[str]:
     """Get the most recent date for a given symbol."""
     with get_connection(config) as conn:
@@ -219,10 +490,15 @@ def schema_exists(config: DatabaseConfig) -> bool:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'stock_prices'
-                )
+                SELECT COUNT(*)
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                  AND table_name IN (
+                      'tickers',
+                      'stock_prices',
+                      'indicator_catalog',
+                      'stock_indicators'
+                  )
                 """
             )
-            return cur.fetchone()[0]
+            return cur.fetchone()[0] == 4
