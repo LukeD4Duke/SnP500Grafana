@@ -24,9 +24,7 @@ class DatabaseConfig:
 
     @property
     def url(self) -> str:
-        return (
-            f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
-        )
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
 
 
 @dataclass
@@ -34,14 +32,14 @@ class FetcherConfig:
     """yfinance and scheduler configuration."""
 
     chunk_size: int
-    symbol_retry_count: int
-    recovery_chunk_size: int
-    failed_symbol_log_limit: int
     delay_seconds: float
     historical_start: str
     update_cron: str
     max_retries: int
     retry_delay_seconds: float
+    symbol_retry_count: int = 2
+    recovery_chunk_size: int = 5
+    failed_symbol_log_limit: int = 20
     backfill_start: Optional[str] = None
 
 
@@ -53,6 +51,24 @@ class IndicatorConfig:
     rebuild_on_startup: bool
     batch_size: int
     incremental_lookback_rows: int
+
+
+@dataclass
+class AnalyticsConfig:
+    """Analytics snapshot configuration."""
+
+    enabled: bool
+    timeframes: list[str]
+
+
+@dataclass
+class ReportingConfig:
+    """Scheduled report generation configuration."""
+
+    enabled: bool
+    output_dir: str
+    weekly_cron: str
+    monthly_cron: str
 
 
 def get_database_config() -> DatabaseConfig:
@@ -82,7 +98,7 @@ def get_fetcher_config() -> FetcherConfig:
         delay_seconds=float(os.environ.get("YFINANCE_DELAY_SEC", "2.5")),
         historical_start=os.environ.get("HISTORICAL_START", "2020-01-01"),
         backfill_start=os.environ.get("BACKFILL_START") or None,
-        update_cron=os.environ.get("UPDATE_CRON", "0 23 * * *"),  # 11 PM UTC = 6 PM ET
+        update_cron=os.environ.get("UPDATE_CRON", "0 23 * * *"),
         max_retries=int(os.environ.get("YFINANCE_MAX_RETRIES", "5")),
         retry_delay_seconds=float(os.environ.get("YFINANCE_RETRY_DELAY", "60")),
     )
@@ -103,4 +119,26 @@ def get_indicator_config() -> IndicatorConfig:
         rebuild_on_startup=_get_bool_env("INDICATOR_REBUILD_ON_STARTUP", False),
         batch_size=int(os.environ.get("INDICATOR_BATCH_SIZE", "25")),
         incremental_lookback_rows=int(os.environ.get("INDICATOR_INCREMENTAL_LOOKBACK_ROWS", "1000")),
+    )
+
+
+def get_analytics_config() -> AnalyticsConfig:
+    """Load analytics snapshot configuration from environment."""
+    raw_timeframes = os.environ.get("ANALYTICS_TIMEFRAMES", "daily,weekly,monthly")
+    timeframes = [value.strip().lower() for value in raw_timeframes.split(",") if value.strip()]
+    if not timeframes:
+        timeframes = ["daily", "weekly", "monthly"]
+    return AnalyticsConfig(
+        enabled=_get_bool_env("ANALYTICS_ENABLED", True),
+        timeframes=timeframes,
+    )
+
+
+def get_reporting_config() -> ReportingConfig:
+    """Load report generation configuration from environment."""
+    return ReportingConfig(
+        enabled=_get_bool_env("REPORTS_ENABLED", True),
+        output_dir=os.environ.get("REPORT_OUTPUT_DIR", "/app/reports"),
+        weekly_cron=os.environ.get("REPORT_WEEKLY_CRON", "15 0 * * 1"),
+        monthly_cron=os.environ.get("REPORT_MONTHLY_CRON", "30 0 1 * *"),
     )

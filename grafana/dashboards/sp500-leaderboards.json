@@ -6,7 +6,48 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Ticker Detail",
+      "type": "link",
+      "url": "/d/sp500-ticker-detail/sp500-ticker-detail"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Trend Regime",
+      "type": "link",
+      "url": "/d/sp500-trend-regime/sp500-trend-regime"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Breakout Breakdown",
+      "type": "link",
+      "url": "/d/sp500-breakout-breakdown/sp500-breakout-breakdown"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Mean Reversion",
+      "type": "link",
+      "url": "/d/sp500-mean-reversion/sp500-mean-reversion"
+    }
+  ],
   "liveNow": false,
   "panels": [
     {
@@ -37,13 +78,6 @@
               "type": "linear"
             }
           },
-          "links": [
-            {
-              "targetBlank": false,
-              "title": "Open ticker detail",
-              "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
-            }
-          ],
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -59,53 +93,16 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "company_name"
+              "options": "ticker"
             },
             "properties": [
               {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "bar_color_code"
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": true,
-                  "viz": true
-                }
-              },
-              {
-                "id": "mappings",
+                "id": "links",
                 "value": [
                   {
-                    "type": "value",
-                    "options": {
-                      "1": {
-                        "text": "Dark Blue",
-                        "color": "dark-blue"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "2": {
-                        "text": "Blue",
-                        "color": "blue"
-                      }
-                    }
+                    "targetBlank": false,
+                    "title": "Open ticker detail",
+                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
                   }
                 ]
               }
@@ -115,7 +112,7 @@
       },
       "gridPos": {
         "h": 10,
-        "w": 24,
+        "w": 12,
         "x": 0,
         "y": 0
       },
@@ -123,8 +120,6 @@
       "options": {
         "barRadius": 0,
         "barWidth": 0.9,
-        "colorByField": "bar_color_code",
-        "fullHighlight": false,
         "groupWidth": 0.8,
         "legend": {
           "displayMode": "list",
@@ -152,88 +147,12 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), yearly_range AS (\n    SELECT\n        symbol,\n        MIN(low) AS low_52w\n    FROM stock_prices\n    WHERE timestamp >= NOW() - INTERVAL '52 weeks'\n    GROUP BY symbol\n), ranked AS (\n    SELECT\n        lp.symbol AS ticker,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - yr.low_52w) / yr.low_52w) * 100 AS pct_above_52w_low,\n        ROW_NUMBER() OVER (\n            ORDER BY ((lp.latest_close - yr.low_52w) / yr.low_52w) * 100 ASC, lp.symbol\n        ) AS display_rank\n    FROM latest_prices lp\n    JOIN yearly_range yr ON yr.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE yr.low_52w IS NOT NULL AND yr.low_52w <> 0\n)\nSELECT\n    ticker,\n    company_name,\n    pct_above_52w_low AS \"% Above 52W Low\",\n    CASE WHEN MOD(display_rank, 2) = 1 THEN 1 ELSE 2 END AS bar_color_code\nFROM ranked\nORDER BY pct_above_52w_low ASC, ticker\nLIMIT 50",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bull_rank ASC, rs.symbol LIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Top 50 Closest to 52-Week Low",
+      "title": "Top Bullish Ranks",
       "type": "barchart"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "timescaledb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ticker"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": false,
-                    "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 10
-      },
-      "id": 11,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "postgres",
-            "uid": "timescaledb"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), yearly_range AS (\n    SELECT\n        symbol,\n        MIN(low) AS low_52w\n    FROM stock_prices\n    WHERE timestamp >= NOW() - INTERVAL '52 weeks'\n    GROUP BY symbol\n), ranked AS (\n    SELECT\n        lp.symbol AS ticker,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - yr.low_52w) / yr.low_52w) * 100 AS pct_above_52w_low,\n        ROW_NUMBER() OVER (\n            ORDER BY ((lp.latest_close - yr.low_52w) / yr.low_52w) * 100 ASC, lp.symbol\n        ) AS display_rank\n    FROM latest_prices lp\n    JOIN yearly_range yr ON yr.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE yr.low_52w IS NOT NULL AND yr.low_52w <> 0\n)\nSELECT\n    ticker,\n    company_name,\n    pct_above_52w_low AS \"% Above 52W Low\"\nFROM ranked\nORDER BY pct_above_52w_low ASC, ticker\nLIMIT 50",
-          "refId": "A"
-        }
-      ],
-      "title": "Top 50 Closest to 52-Week Low Links",
-      "type": "table"
     },
     {
       "datasource": {
@@ -263,13 +182,6 @@
               "type": "linear"
             }
           },
-          "links": [
-            {
-              "targetBlank": false,
-              "title": "Open ticker detail",
-              "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
-            }
-          ],
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -285,71 +197,16 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "company_name"
+              "options": "ticker"
             },
             "properties": [
               {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "bar_color_code"
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": true,
-                  "viz": true
-                }
-              },
-              {
-                "id": "mappings",
+                "id": "links",
                 "value": [
                   {
-                    "type": "value",
-                    "options": {
-                      "1": {
-                        "text": "Dark Green",
-                        "color": "dark-green"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "2": {
-                        "text": "Green",
-                        "color": "green"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "3": {
-                        "text": "Dark Red",
-                        "color": "dark-red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "4": {
-                        "text": "Red",
-                        "color": "red"
-                      }
-                    }
+                    "targetBlank": false,
+                    "title": "Open ticker detail",
+                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
                   }
                 ]
               }
@@ -359,16 +216,14 @@
       },
       "gridPos": {
         "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 18
+        "w": 12,
+        "x": 12,
+        "y": 0
       },
       "id": 2,
       "options": {
         "barRadius": 0,
         "barWidth": 0.9,
-        "colorByField": "bar_color_code",
-        "fullHighlight": false,
         "groupWidth": 0.8,
         "legend": {
           "displayMode": "list",
@@ -396,11 +251,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        timestamp AS latest_timestamp,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), prior_prices AS (\n    SELECT\n        lp.symbol,\n        prior.close AS prior_close\n    FROM latest_prices lp\n    JOIN LATERAL (\n        SELECT close\n        FROM stock_prices\n        WHERE symbol = lp.symbol AND timestamp <= lp.latest_timestamp - INTERVAL '7 days'\n        ORDER BY timestamp DESC\n        LIMIT 1\n    ) prior ON TRUE\n), returns AS (\n    SELECT\n        lp.symbol,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - pp.prior_close) / pp.prior_close) * 100 AS return_pct\n    FROM latest_prices lp\n    JOIN prior_prices pp ON pp.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE pp.prior_close IS NOT NULL AND pp.prior_close <> 0\n), ranked AS (\n    SELECT\n        symbol,\n        company_name,\n        return_pct,\n        CASE WHEN return_pct >= 0 THEN 0 ELSE 1 END AS sort_bucket,\n        ROW_NUMBER() OVER (\n            PARTITION BY CASE WHEN return_pct >= 0 THEN 'positive' ELSE 'negative' END\n            ORDER BY CASE WHEN return_pct >= 0 THEN return_pct END DESC,\n                     CASE WHEN return_pct < 0 THEN return_pct END ASC,\n                     symbol\n        ) AS side_rank\n    FROM returns\n)\nSELECT\n    symbol AS ticker,\n    company_name,\n    CASE WHEN return_pct >= 0 THEN return_pct END AS \"Positive Change %\",\n    CASE WHEN return_pct < 0 THEN return_pct END AS \"Negative Change %\",\n    CASE\n        WHEN return_pct >= 0 AND MOD(side_rank, 2) = 1 THEN 1\n        WHEN return_pct >= 0 THEN 2\n        WHEN MOD(side_rank, 2) = 1 THEN 3\n        ELSE 4\n    END AS bar_color_code\nFROM ranked\nWHERE side_rank <= 20\nORDER BY sort_bucket, ABS(return_pct) DESC, ticker",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bear_rank ASC, rs.symbol LIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Top 20 Weekly Gainers and Losers",
+      "title": "Top Bearish Ranks",
       "type": "barchart"
     },
     {
@@ -441,7 +296,7 @@
                   {
                     "targetBlank": false,
                     "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
+                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
                   }
                 ]
               }
@@ -450,257 +305,13 @@
         ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 24,
+        "h": 9,
+        "w": 12,
         "x": 0,
-        "y": 28
-      },
-      "id": 12,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "postgres",
-            "uid": "timescaledb"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        timestamp AS latest_timestamp,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), prior_prices AS (\n    SELECT\n        lp.symbol,\n        prior.close AS prior_close\n    FROM latest_prices lp\n    JOIN LATERAL (\n        SELECT close\n        FROM stock_prices\n        WHERE symbol = lp.symbol AND timestamp <= lp.latest_timestamp - INTERVAL '7 days'\n        ORDER BY timestamp DESC\n        LIMIT 1\n    ) prior ON TRUE\n), returns AS (\n    SELECT\n        lp.symbol,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - pp.prior_close) / pp.prior_close) * 100 AS return_pct\n    FROM latest_prices lp\n    JOIN prior_prices pp ON pp.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE pp.prior_close IS NOT NULL AND pp.prior_close <> 0\n), ranked AS (\n    SELECT\n        symbol,\n        company_name,\n        return_pct,\n        CASE WHEN return_pct >= 0 THEN 0 ELSE 1 END AS sort_bucket,\n        ROW_NUMBER() OVER (\n            PARTITION BY CASE WHEN return_pct >= 0 THEN 'positive' ELSE 'negative' END\n            ORDER BY CASE WHEN return_pct >= 0 THEN return_pct END DESC,\n                     CASE WHEN return_pct < 0 THEN return_pct END ASC,\n                     symbol\n        ) AS side_rank\n    FROM returns\n)\nSELECT\n    symbol AS ticker,\n    company_name,\n    CASE WHEN return_pct >= 0 THEN return_pct END AS \"Positive Change %\",\n    CASE WHEN return_pct < 0 THEN return_pct END AS \"Negative Change %\"\nFROM ranked\nWHERE side_rank <= 20\nORDER BY sort_bucket, ABS(return_pct) DESC, ticker",
-          "refId": "A"
-        }
-      ],
-      "title": "Weekly Gainers and Losers Links",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "timescaledb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "links": [
-            {
-              "targetBlank": false,
-              "title": "Open ticker detail",
-              "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
-            }
-          ],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "company_name"
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "bar_color_code"
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": true,
-                  "viz": true
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "1": {
-                        "text": "Dark Green",
-                        "color": "dark-green"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "2": {
-                        "text": "Green",
-                        "color": "green"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "3": {
-                        "text": "Dark Red",
-                        "color": "dark-red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "4": {
-                        "text": "Red",
-                        "color": "red"
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 36
+        "y": 10
       },
       "id": 3,
       "options": {
-        "barRadius": 0,
-        "barWidth": 0.9,
-        "colorByField": "bar_color_code",
-        "fullHighlight": false,
-        "groupWidth": 0.8,
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "orientation": "vertical",
-        "showValue": "auto",
-        "stacking": "none",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "xField": "ticker",
-        "xTickLabelMaxLength": 12,
-        "xTickLabelRotation": 45,
-        "xTickLabelSpacing": 0
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "postgres",
-            "uid": "timescaledb"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        timestamp AS latest_timestamp,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), prior_prices AS (\n    SELECT\n        lp.symbol,\n        prior.close AS prior_close\n    FROM latest_prices lp\n    JOIN LATERAL (\n        SELECT close\n        FROM stock_prices\n        WHERE symbol = lp.symbol AND timestamp <= lp.latest_timestamp - INTERVAL '1 month'\n        ORDER BY timestamp DESC\n        LIMIT 1\n    ) prior ON TRUE\n), returns AS (\n    SELECT\n        lp.symbol,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - pp.prior_close) / pp.prior_close) * 100 AS return_pct\n    FROM latest_prices lp\n    JOIN prior_prices pp ON pp.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE pp.prior_close IS NOT NULL AND pp.prior_close <> 0\n), ranked AS (\n    SELECT\n        symbol,\n        company_name,\n        return_pct,\n        CASE WHEN return_pct >= 0 THEN 0 ELSE 1 END AS sort_bucket,\n        ROW_NUMBER() OVER (\n            PARTITION BY CASE WHEN return_pct >= 0 THEN 'positive' ELSE 'negative' END\n            ORDER BY CASE WHEN return_pct >= 0 THEN return_pct END DESC,\n                     CASE WHEN return_pct < 0 THEN return_pct END ASC,\n                     symbol\n        ) AS side_rank\n    FROM returns\n)\nSELECT\n    symbol AS ticker,\n    company_name,\n    CASE WHEN return_pct >= 0 THEN return_pct END AS \"Positive Change %\",\n    CASE WHEN return_pct < 0 THEN return_pct END AS \"Negative Change %\",\n    CASE\n        WHEN return_pct >= 0 AND MOD(side_rank, 2) = 1 THEN 1\n        WHEN return_pct >= 0 THEN 2\n        WHEN MOD(side_rank, 2) = 1 THEN 3\n        ELSE 4\n    END AS bar_color_code\nFROM ranked\nWHERE side_rank <= 20\nORDER BY sort_bucket, ABS(return_pct) DESC, ticker",
-          "refId": "A"
-        }
-      ],
-      "title": "Top 20 Monthly Gainers and Losers",
-      "type": "barchart"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "timescaledb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ticker"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": false,
-                    "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 46
-      },
-      "id": 13,
-      "options": {
         "cellHeight": "sm",
         "footer": {
           "show": false
@@ -716,11 +327,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        timestamp AS latest_timestamp,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), prior_prices AS (\n    SELECT\n        lp.symbol,\n        prior.close AS prior_close\n    FROM latest_prices lp\n    JOIN LATERAL (\n        SELECT close\n        FROM stock_prices\n        WHERE symbol = lp.symbol AND timestamp <= lp.latest_timestamp - INTERVAL '1 month'\n        ORDER BY timestamp DESC\n        LIMIT 1\n    ) prior ON TRUE\n), returns AS (\n    SELECT\n        lp.symbol,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - pp.prior_close) / pp.prior_close) * 100 AS return_pct\n    FROM latest_prices lp\n    JOIN prior_prices pp ON pp.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE pp.prior_close IS NOT NULL AND pp.prior_close <> 0\n), ranked AS (\n    SELECT\n        symbol,\n        company_name,\n        return_pct,\n        CASE WHEN return_pct >= 0 THEN 0 ELSE 1 END AS sort_bucket,\n        ROW_NUMBER() OVER (\n            PARTITION BY CASE WHEN return_pct >= 0 THEN 'positive' ELSE 'negative' END\n            ORDER BY CASE WHEN return_pct >= 0 THEN return_pct END DESC,\n                     CASE WHEN return_pct < 0 THEN return_pct END ASC,\n                     symbol\n        ) AS side_rank\n    FROM returns\n)\nSELECT\n    symbol AS ticker,\n    company_name,\n    CASE WHEN return_pct >= 0 THEN return_pct END AS \"Positive Change %\",\n    CASE WHEN return_pct < 0 THEN return_pct END AS \"Negative Change %\"\nFROM ranked\nWHERE side_rank <= 20\nORDER BY sort_bucket, ABS(return_pct) DESC, ticker",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bull_rank ASC, rs.symbol LIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Monthly Gainers and Losers Links",
+      "title": "Bullish Table",
       "type": "table"
     },
     {
@@ -730,174 +341,6 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          },
-          "links": [
-            {
-              "targetBlank": false,
-              "title": "Open ticker detail",
-              "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
-            }
-          ],
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "company_name"
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "bar_color_code"
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": true,
-                  "tooltip": true,
-                  "viz": true
-                }
-              },
-              {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "1": {
-                        "text": "Dark Green",
-                        "color": "dark-green"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "2": {
-                        "text": "Green",
-                        "color": "green"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "3": {
-                        "text": "Dark Red",
-                        "color": "dark-red"
-                      }
-                    }
-                  },
-                  {
-                    "type": "value",
-                    "options": {
-                      "4": {
-                        "text": "Red",
-                        "color": "red"
-                      }
-                    }
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 24,
-        "x": 0,
-        "y": 54
-      },
-      "id": 4,
-      "options": {
-        "barRadius": 0,
-        "barWidth": 0.9,
-        "colorByField": "bar_color_code",
-        "fullHighlight": false,
-        "groupWidth": 0.8,
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "orientation": "vertical",
-        "showValue": "auto",
-        "stacking": "none",
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "xField": "ticker",
-        "xTickLabelMaxLength": 12,
-        "xTickLabelRotation": 45,
-        "xTickLabelSpacing": 0
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "postgres",
-            "uid": "timescaledb"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        timestamp AS latest_timestamp,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), prior_prices AS (\n    SELECT\n        lp.symbol,\n        prior.close AS prior_close\n    FROM latest_prices lp\n    JOIN LATERAL (\n        SELECT close\n        FROM stock_prices\n        WHERE symbol = lp.symbol AND timestamp <= lp.latest_timestamp - INTERVAL '3 months'\n        ORDER BY timestamp DESC\n        LIMIT 1\n    ) prior ON TRUE\n), returns AS (\n    SELECT\n        lp.symbol,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - pp.prior_close) / pp.prior_close) * 100 AS return_pct\n    FROM latest_prices lp\n    JOIN prior_prices pp ON pp.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE pp.prior_close IS NOT NULL AND pp.prior_close <> 0\n), ranked AS (\n    SELECT\n        symbol,\n        company_name,\n        return_pct,\n        CASE WHEN return_pct >= 0 THEN 0 ELSE 1 END AS sort_bucket,\n        ROW_NUMBER() OVER (\n            PARTITION BY CASE WHEN return_pct >= 0 THEN 'positive' ELSE 'negative' END\n            ORDER BY CASE WHEN return_pct >= 0 THEN return_pct END DESC,\n                     CASE WHEN return_pct < 0 THEN return_pct END ASC,\n                     symbol\n        ) AS side_rank\n    FROM returns\n)\nSELECT\n    symbol AS ticker,\n    company_name,\n    CASE WHEN return_pct >= 0 THEN return_pct END AS \"Positive Change %\",\n    CASE WHEN return_pct < 0 THEN return_pct END AS \"Negative Change %\",\n    CASE\n        WHEN return_pct >= 0 AND MOD(side_rank, 2) = 1 THEN 1\n        WHEN return_pct >= 0 THEN 2\n        WHEN MOD(side_rank, 2) = 1 THEN 3\n        ELSE 4\n    END AS bar_color_code\nFROM ranked\nWHERE side_rank <= 20\nORDER BY sort_bucket, ABS(return_pct) DESC, ticker",
-          "refId": "A"
-        }
-      ],
-      "title": "Top 20 Three-Month Gainers and Losers",
-      "type": "barchart"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "timescaledb"
-      },
-      "fieldConfig": {
-        "defaults": {
           "custom": {
             "align": "auto",
             "cellOptions": {
@@ -929,7 +372,7 @@
                   {
                     "targetBlank": false,
                     "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
+                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
                   }
                 ]
               }
@@ -938,12 +381,12 @@
         ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 64
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 10
       },
-      "id": 14,
+      "id": 4,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -960,11 +403,68 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_prices AS (\n    SELECT DISTINCT ON (symbol)\n        symbol,\n        timestamp AS latest_timestamp,\n        close AS latest_close\n    FROM stock_prices\n    ORDER BY symbol, timestamp DESC\n), prior_prices AS (\n    SELECT\n        lp.symbol,\n        prior.close AS prior_close\n    FROM latest_prices lp\n    JOIN LATERAL (\n        SELECT close\n        FROM stock_prices\n        WHERE symbol = lp.symbol AND timestamp <= lp.latest_timestamp - INTERVAL '3 months'\n        ORDER BY timestamp DESC\n        LIMIT 1\n    ) prior ON TRUE\n), returns AS (\n    SELECT\n        lp.symbol,\n        COALESCE(t.name, lp.symbol) AS company_name,\n        ((lp.latest_close - pp.prior_close) / pp.prior_close) * 100 AS return_pct\n    FROM latest_prices lp\n    JOIN prior_prices pp ON pp.symbol = lp.symbol\n    LEFT JOIN tickers t ON t.symbol = lp.symbol\n    WHERE pp.prior_close IS NOT NULL AND pp.prior_close <> 0\n), ranked AS (\n    SELECT\n        symbol,\n        company_name,\n        return_pct,\n        CASE WHEN return_pct >= 0 THEN 0 ELSE 1 END AS sort_bucket,\n        ROW_NUMBER() OVER (\n            PARTITION BY CASE WHEN return_pct >= 0 THEN 'positive' ELSE 'negative' END\n            ORDER BY CASE WHEN return_pct >= 0 THEN return_pct END DESC,\n                     CASE WHEN return_pct < 0 THEN return_pct END ASC,\n                     symbol\n        ) AS side_rank\n    FROM returns\n)\nSELECT\n    symbol AS ticker,\n    company_name,\n    CASE WHEN return_pct >= 0 THEN return_pct END AS \"Positive Change %\",\n    CASE WHEN return_pct < 0 THEN return_pct END AS \"Negative Change %\"\nFROM ranked\nWHERE side_rank <= 20\nORDER BY sort_bucket, ABS(return_pct) DESC, ticker",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bear_rank ASC, rs.symbol LIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Three-Month Gainers and Losers Links",
+      "title": "Bearish Table",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "id": 5,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_report AS (SELECT MAX(snapshot_date) AS snapshot_date FROM report_snapshots WHERE timeframe = '${timeframe}' AND report_kind = '${report_kind}'), latest_reports AS (SELECT * FROM report_snapshots WHERE timeframe = '${timeframe}' AND report_kind = '${report_kind}' AND snapshot_date = (SELECT snapshot_date FROM latest_report)) SELECT symbol, title, summary_text, risk_text, storage_path FROM latest_reports ORDER BY symbol",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Report Snapshot",
       "type": "table"
     }
   ],
@@ -974,10 +474,11 @@
   "tags": [
     "sp500",
     "leaderboards",
+    "analytics",
     "generated"
   ],
   "time": {
-    "from": "now-3y",
+    "from": "now-1y",
     "to": "now"
   },
   "timepicker": {},
@@ -985,5 +486,66 @@
   "title": "S&P 500 Leaderboards",
   "uid": "sp500-leaderboards",
   "version": 1,
-  "weekStart": ""
+  "weekStart": "",
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "Daily",
+          "value": "daily"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Timeframe",
+        "multi": false,
+        "name": "timeframe",
+        "options": [],
+        "query": "Daily : daily, Weekly : weekly, Monthly : monthly",
+        "skipUrlSync": false,
+        "type": "custom"
+      },
+      {
+        "datasource": {
+          "type": "postgres",
+          "uid": "timescaledb"
+        },
+        "definition": "SELECT DISTINCT sector FROM tickers WHERE sector IS NOT NULL AND sector <> '' ORDER BY 1",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Sector",
+        "multi": false,
+        "name": "sector",
+        "options": [],
+        "query": "SELECT DISTINCT sector FROM tickers WHERE sector IS NOT NULL AND sector <> '' ORDER BY 1",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "__all"
+        },
+        "allValue": "__all"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "Weekly",
+          "value": "weekly"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Report Kind",
+        "multi": false,
+        "name": "report_kind",
+        "options": [],
+        "query": "Weekly : weekly, Monthly : monthly",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
+  }
 }

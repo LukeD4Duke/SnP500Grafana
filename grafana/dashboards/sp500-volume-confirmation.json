@@ -13,16 +13,6 @@
       "includeVars": true,
       "keepTime": false,
       "targetBlank": false,
-      "title": "Leaderboards",
-      "type": "link",
-      "url": "/d/sp500-leaderboards/sp500-leaderboards"
-    },
-    {
-      "asDropdown": false,
-      "icon": "dashboard",
-      "includeVars": true,
-      "keepTime": false,
-      "targetBlank": false,
       "title": "Trend Regime",
       "type": "link",
       "url": "/d/sp500-trend-regime/sp500-trend-regime"
@@ -33,9 +23,9 @@
       "includeVars": true,
       "keepTime": false,
       "targetBlank": false,
-      "title": "Momentum",
+      "title": "Relative Strength",
       "type": "link",
-      "url": "/d/sp500-momentum/sp500-momentum"
+      "url": "/d/sp500-relative-strength/sp500-relative-strength"
     },
     {
       "asDropdown": false,
@@ -43,9 +33,9 @@
       "includeVars": true,
       "keepTime": false,
       "targetBlank": false,
-      "title": "Relative Strength",
+      "title": "Leaderboards",
       "type": "link",
-      "url": "/d/sp500-relative-strength/sp500-relative-strength"
+      "url": "/d/sp500-leaderboards/sp500-leaderboards"
     }
   ],
   "liveNow": false,
@@ -57,12 +47,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
+          "color": {
+            "mode": "thresholds"
           },
           "mappings": [],
           "thresholds": {
@@ -73,7 +59,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "none"
         },
         "overrides": []
       },
@@ -85,11 +72,20 @@
       },
       "id": 1,
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "show": false
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "showHeader": false
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
@@ -100,12 +96,12 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT '<div style=\"font-size:26px;font-weight:700;text-align:center;line-height:1.2;\">' || COALESCE(name, symbol) || '</div>' AS company FROM tickers WHERE symbol = '${ticker}'",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT avg_final_score AS value FROM latest_breadth",
           "refId": "A"
         }
       ],
-      "title": "Company",
-      "type": "table"
+      "title": "Average Final Score",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -127,13 +123,13 @@
               }
             ]
           },
-          "unit": "currencyUSD"
+          "unit": "none"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 6,
         "x": 6,
         "y": 0
       },
@@ -163,11 +159,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT close AS value FROM stock_prices WHERE symbol = '${ticker}' ORDER BY timestamp DESC LIMIT 1",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT bullish_count AS value FROM latest_breadth",
           "refId": "A"
         }
       ],
-      "title": "Last Close",
+      "title": "Bullish Count",
       "type": "stat"
     },
     {
@@ -196,8 +192,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 10,
+        "w": 6,
+        "x": 12,
         "y": 0
       },
       "id": 3,
@@ -226,11 +222,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT final_score AS value FROM latest_signals WHERE symbol = '${ticker}'",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT bearish_count AS value FROM latest_breadth",
           "refId": "A"
         }
       ],
-      "title": "Final Score",
+      "title": "Bearish Count",
       "type": "stat"
     },
     {
@@ -240,12 +236,8 @@
       },
       "fieldConfig": {
         "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
+          "color": {
+            "mode": "thresholds"
           },
           "mappings": [],
           "thresholds": {
@@ -256,23 +248,33 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "percent"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 4,
-        "w": 10,
-        "x": 14,
+        "w": 6,
+        "x": 18,
         "y": 0
       },
       "id": 4,
       "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "show": false
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "showHeader": true
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
@@ -283,12 +285,12 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT recommendation_label, regime_label, volatility_state FROM latest_signals WHERE symbol = '${ticker}'",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT pct_above_ema50 AS value FROM latest_breadth",
           "refId": "A"
         }
       ],
-      "title": "Recommendation",
-      "type": "table"
+      "title": "% Above EMA50",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -301,26 +303,21 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
+            "axisLabel": "",
             "axisPlacement": "auto",
-            "drawStyle": "line",
-            "fillOpacity": 10,
+            "fillOpacity": 80,
             "gradientMode": "none",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineWidth": 1,
             "scaleDistribution": {
               "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": true,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
             }
           },
           "mappings": [],
@@ -332,28 +329,56 @@
                 "value": null
               }
             ]
-          },
-          "unit": "currencyUSD"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ticker"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": false,
+                    "title": "Open ticker detail",
+                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 16,
+        "h": 10,
+        "w": 24,
         "x": 0,
         "y": 4
       },
       "id": 5,
       "options": {
+        "barRadius": 0,
+        "barWidth": 0.9,
+        "groupWidth": 0.8,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
+        "orientation": "vertical",
+        "showValue": "auto",
+        "stacking": "none",
         "tooltip": {
           "mode": "single",
           "sort": "none"
-        }
+        },
+        "xField": "ticker",
+        "xTickLabelMaxLength": 12,
+        "xTickLabelRotation": 45,
+        "xTickLabelSpacing": 0
       },
       "targets": [
         {
@@ -362,14 +387,14 @@
             "uid": "timescaledb"
           },
           "editorMode": "code",
-          "format": "time_series",
+          "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT timestamp AS time, close AS \"Close Price\" FROM stock_prices WHERE symbol = '${ticker}' AND $__timeFilter(timestamp) ORDER BY timestamp",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, COALESCE(t.sector,'') AS sector, ss.close, ss.final_score, ss.trend_score, ss.momentum_score, ss.volume_score, ss.relative_strength_score, ss.structure_score, ss.mean_reversion_score, ss.volatility_risk_score, ss.regime_label, ss.recommendation_label, ss.breakout_flag, ss.breakdown_flag, ss.overbought_flag, ss.oversold_flag, ss.trend_alignment_flag, ss.data_quality_flag FROM latest_signals ss LEFT JOIN tickers t ON t.symbol = ss.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') AND (TRUE) ORDER BY ss.volume_score DESC, ss.symbol LIMIT 20",
           "refId": "A"
         }
       ],
-      "title": "Close Price",
-      "type": "timeseries"
+      "title": "Top Volume Scores",
+      "type": "barchart"
     },
     {
       "datasource": {
@@ -378,31 +403,12 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
           "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisPlacement": "auto",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
             },
-            "showPoints": "auto",
-            "spanNulls": true,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "inspect": false
           },
           "mappings": [],
           "thresholds": {
@@ -413,80 +419,37 @@
                 "value": null
               }
             ]
-          },
-          "unit": "none"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ticker"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": false,
+                    "title": "Open ticker detail",
+                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 4
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 14
       },
       "id": 6,
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "postgres",
-            "uid": "timescaledb"
-          },
-          "editorMode": "code",
-          "format": "time_series",
-          "rawQuery": true,
-          "rawSql": "SELECT snapshot_date AS time, final_score AS \"Final Score\" FROM signal_snapshots WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date",
-          "refId": "A"
-        }
-      ],
-      "title": "Score History",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "timescaledb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 24,
-        "x": 0,
-        "y": 12
-      },
-      "id": 7,
-      "options": {
         "cellHeight": "sm",
         "footer": {
           "show": false
@@ -502,68 +465,11 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT trend_score, momentum_score, volume_score, relative_strength_score, structure_score, mean_reversion_score, volatility_risk_score, breakout_flag, breakdown_flag, overbought_flag, oversold_flag, trend_alignment_flag, data_quality_flag FROM latest_signals WHERE symbol = '${ticker}'",
+          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, COALESCE(t.sector,'') AS sector, ss.close, ss.final_score, ss.trend_score, ss.momentum_score, ss.volume_score, ss.relative_strength_score, ss.structure_score, ss.mean_reversion_score, ss.volatility_risk_score, ss.regime_label, ss.recommendation_label, ss.breakout_flag, ss.breakdown_flag, ss.overbought_flag, ss.oversold_flag, ss.trend_alignment_flag, ss.data_quality_flag FROM latest_signals ss LEFT JOIN tickers t ON t.symbol = ss.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') AND (TRUE) ORDER BY ss.volume_score DESC, ss.symbol LIMIT 30",
           "refId": "A"
         }
       ],
-      "title": "Analytics Snapshot",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "postgres",
-        "uid": "timescaledb"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 24,
-        "x": 0,
-        "y": 19
-      },
-      "id": 8,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "postgres",
-            "uid": "timescaledb"
-          },
-          "editorMode": "code",
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT driver->>'label' AS driver, driver->>'value' AS value FROM latest_signals, LATERAL jsonb_array_elements(drivers_json) AS driver WHERE symbol = '${ticker}'",
-          "refId": "A"
-        }
-      ],
-      "title": "Key Drivers",
+      "title": "Volume Confirmation Table",
       "type": "table"
     }
   ],
@@ -572,7 +478,7 @@
   "style": "dark",
   "tags": [
     "sp500",
-    "ticker",
+    "volume",
     "analytics",
     "generated"
   ],
@@ -582,8 +488,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "S&P 500 Ticker Detail",
-  "uid": "sp500-ticker-detail",
+  "title": "S&P 500 Volume Confirmation",
+  "uid": "sp500-volume-confirmation",
   "version": 1,
   "weekStart": "",
   "templating": {
@@ -628,26 +534,6 @@
           "value": "__all"
         },
         "allValue": "__all"
-      },
-      {
-        "datasource": {
-          "type": "postgres",
-          "uid": "timescaledb"
-        },
-        "definition": "SELECT name || ' (' || symbol || ')' AS __text, symbol AS __value FROM tickers ORDER BY symbol",
-        "hide": 0,
-        "includeAll": false,
-        "label": "Ticker",
-        "multi": false,
-        "name": "ticker",
-        "options": [],
-        "query": "SELECT name || ' (' || symbol || ')' AS __text, symbol AS __value FROM tickers ORDER BY symbol",
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query",
-        "current": {}
       }
     ]
   }

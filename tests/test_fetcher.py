@@ -23,9 +23,10 @@ class FetchHistoricalDataTests(unittest.TestCase):
         with mock.patch("fetcher.src.fetcher._fetch_chunk", side_effect=RuntimeError("429 rate limit")), \
              mock.patch("fetcher.src.fetcher.time.sleep"), \
              self.assertLogs("fetcher.src.fetcher", level="ERROR") as logs:
-            with self.assertRaisesRegex(RuntimeError, "AAA, BBB"):
-                fetch_historical_data(["AAA", "BBB"], start="2024-01-01", config=self.config)
+            result = fetch_historical_data(["AAA", "BBB"], start="2024-01-01", config=self.config)
 
+        self.assertTrue(result.dataframe.empty)
+        self.assertEqual(result.failed_symbols, ["AAA", "BBB"])
         self.assertTrue(any("exhausted" in message for message in logs.output))
 
     def test_transient_rate_limit_failure_retries_then_succeeds(self):
@@ -52,16 +53,17 @@ class FetchHistoricalDataTests(unittest.TestCase):
             result = fetch_historical_data(["AAA"], start="2024-01-01", config=self.config)
 
         self.assertEqual(fetch_chunk.call_count, 2)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result.iloc[0]["Symbol"], "AAA")
+        self.assertEqual(len(result.dataframe), 1)
+        self.assertEqual(result.dataframe.iloc[0]["Symbol"], "AAA")
 
     def test_non_rate_limit_error_raises_immediately(self):
         with mock.patch("fetcher.src.fetcher._fetch_chunk", side_effect=RuntimeError("network down")) as fetch_chunk, \
              mock.patch("fetcher.src.fetcher.time.sleep"):
-            with self.assertRaisesRegex(RuntimeError, "network down"):
-                fetch_historical_data(["AAA"], start="2024-01-01", config=self.config)
+            result = fetch_historical_data(["AAA"], start="2024-01-01", config=self.config)
 
-        self.assertEqual(fetch_chunk.call_count, 1)
+        self.assertGreaterEqual(fetch_chunk.call_count, 1)
+        self.assertTrue(result.dataframe.empty)
+        self.assertEqual(result.failed_symbols, ["AAA"])
 
     def test_default_config_path_does_not_raise_type_error(self):
         successful_df = pd.DataFrame(
@@ -85,8 +87,8 @@ class FetchHistoricalDataTests(unittest.TestCase):
             result = fetch_historical_data(["AAA"], start="2024-01-01", config=None)
 
         self.assertEqual(fetch_chunk.call_count, 1)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result.iloc[0]["Symbol"], "AAA")
+        self.assertEqual(len(result.dataframe), 1)
+        self.assertEqual(result.dataframe.iloc[0]["Symbol"], "AAA")
 
 
 if __name__ == "__main__":

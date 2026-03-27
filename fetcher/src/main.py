@@ -8,7 +8,14 @@ import pandas as pd
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from .config import get_database_config, get_fetcher_config, get_indicator_config
+from .analytics import refresh_analytics_snapshots
+from .config import (
+    get_analytics_config,
+    get_database_config,
+    get_fetcher_config,
+    get_indicator_config,
+    get_reporting_config,
+)
 from .database import (
     delete_stock_indicators,
     get_all_symbols,
@@ -34,6 +41,7 @@ from .fetcher import (
     normalize_corporate_action_value,
 )
 from .indicators import calculate_indicators, indicators_available
+from .reporting import generate_report_artifacts
 
 logging.basicConfig(
     level=logging.INFO,
@@ -225,6 +233,64 @@ def run_scheduled_sync() -> None:
     """Run the scheduled OHLCV sync followed by indicator refresh."""
     result = run_sync(full_historical=False)
     refresh_indicators(result.successful_symbols, price_frame=result.dataframe)
+    refresh_analytics()
+
+
+def refresh_analytics() -> None:
+    """Refresh additive analytics snapshots when enabled."""
+    analytics_config = get_analytics_config()
+    if not analytics_config.enabled:
+        logger.info("Analytics refresh disabled via ANALYTICS_ENABLED")
+        return
+
+    db_config = get_database_config()
+    analytics_result = refresh_analytics_snapshots(db_config, analytics_config.timeframes)
+    if analytics_result is None:
+        return
+    logger.info(
+        "Analytics snapshot refresh completed for %s across %s (%d signals, %d ranks, %d breadth rows)",
+        analytics_result.snapshot_date,
+        ", ".join(analytics_result.timeframes),
+        analytics_result.signal_rows,
+        analytics_result.rank_rows,
+        analytics_result.breadth_rows,
+    )
+
+
+def generate_configured_reports(report_kind: str | None = None) -> None:
+    """Generate deterministic report artifacts when enabled."""
+    reporting_config = get_reporting_config()
+    if not reporting_config.enabled:
+        logger.info("Report generation disabled via REPORTS_ENABLED")
+        return
+
+    db_config = get_database_config()
+    if report_kind is None:
+        report_kinds = ("weekly", "monthly")
+    else:
+        report_kinds = (report_kind,)
+
+    generated_count = 0
+    for kind in report_kinds:
+        artifact = generate_report_artifacts(
+            db_config,
+            reporting_config.output_dir,
+            kind,
+        )
+        if artifact is None:
+            logger.warning("Skipped %s report generation because no matching analytics snapshot was available", kind)
+            continue
+        generated_count += 1
+        logger.info(
+            "Generated %s report for %s at %s and %s (%d stored rows)",
+            artifact.report_kind,
+            artifact.snapshot_date,
+            artifact.markdown_path,
+            artifact.html_path,
+            artifact.row_count,
+        )
+    if generated_count:
+        logger.info("Generated %d report artifact sets", generated_count)
 
 
 def run_sync(
@@ -321,6 +387,7 @@ def main() -> None:
     db_config = get_database_config()
     fetcher_config = get_fetcher_config()
     indicator_config = get_indicator_config()
+    reporting_config = get_reporting_config()
 
     if not wait_for_db(db_config):
         logger.error("Database not available after max retries. Exiting.")
@@ -343,6 +410,8 @@ def main() -> None:
             price_frame=startup_result.dataframe,
             force_rebuild=indicator_config.rebuild_on_startup,
         )
+        refresh_analytics()
+        generate_configured_reports()
         min_price_date, max_price_date = get_price_date_bounds(db_config)
         logger.info(
             "Current price data range after incremental sync: %s to %s",
@@ -368,6 +437,8 @@ def main() -> None:
                 price_frame=backfill_result.dataframe,
                 force_rebuild=True,
             )
+            refresh_analytics()
+            generate_configured_reports()
             min_price_date, max_price_date = get_price_date_bounds(db_config)
             logger.info(
                 "Price data range after backfill: %s to %s",
@@ -388,6 +459,8 @@ def main() -> None:
             price_frame=full_result.dataframe,
             force_rebuild=True,
         )
+        refresh_analytics()
+        generate_configured_reports()
 
     scheduler = BlockingScheduler()
     scheduler.add_job(
@@ -397,6 +470,21 @@ def main() -> None:
         replace_existing=True,
     )
     logger.info("Scheduled daily update with cron: %s", fetcher_config.update_cron)
+    if reporting_config.enabled:
+        scheduler.add_job(
+            lambda: generate_configured_reports("weekly"),
+            CronTrigger.from_crontab(reporting_config.weekly_cron),
+            id="weekly_report",
+            replace_existing=True,
+        )
+        logger.info("Scheduled weekly report with cron: %s", reporting_config.weekly_cron)
+        scheduler.add_job(
+            lambda: generate_configured_reports("monthly"),
+            CronTrigger.from_crontab(reporting_config.monthly_cron),
+            id="monthly_report",
+            replace_existing=True,
+        )
+        logger.info("Scheduled monthly report with cron: %s", reporting_config.monthly_cron)
     scheduler.start()
 
 

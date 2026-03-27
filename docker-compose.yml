@@ -41,6 +41,14 @@ services:
       INDICATOR_INCREMENTAL_LOOKBACK_ROWS: ${INDICATOR_INCREMENTAL_LOOKBACK_ROWS:-1000}
       INDICATOR_REBUILD_ON_STARTUP: ${INDICATOR_REBUILD_ON_STARTUP:-false}
       INDICATOR_BATCH_SIZE: ${INDICATOR_BATCH_SIZE:-25}
+      ANALYTICS_ENABLED: ${ANALYTICS_ENABLED:-true}
+      ANALYTICS_TIMEFRAMES: ${ANALYTICS_TIMEFRAMES:-daily,weekly,monthly}
+      REPORTS_ENABLED: ${REPORTS_ENABLED:-true}
+      REPORT_OUTPUT_DIR: ${REPORT_OUTPUT_DIR:-/app/reports}
+      REPORT_WEEKLY_CRON: ${REPORT_WEEKLY_CRON:-15 0 * * 1}
+      REPORT_MONTHLY_CRON: ${REPORT_MONTHLY_CRON:-30 0 1 * *}
+    volumes:
+      - ./reports:/app/reports
     depends_on:
       timescaledb:
         condition: service_healthy
