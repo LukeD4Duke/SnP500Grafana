@@ -16,6 +16,16 @@
       "title": "Ticker Detail",
       "type": "link",
       "url": "/d/sp500-ticker-detail/sandp-500-ticker-detail"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Indicator Overview",
+      "type": "link",
+      "url": "/d/sp500-indicator-overview/sandp-500-indicator-overview"
     }
   ],
   "liveNow": false,
@@ -311,7 +321,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT indicator_key, display_name, category, source_library, default_params\nFROM indicator_catalog\nWHERE indicator_key = '${indicator}'",
+          "rawSql": "SELECT indicator_key, display_name, category, purpose_description, value_interpretation, source_library, default_params\nFROM indicator_catalog\nWHERE indicator_key = '${indicator}'",
           "refId": "A"
         }
       ],

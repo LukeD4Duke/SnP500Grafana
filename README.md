@@ -66,6 +66,7 @@ Generated dashboards:
 - `S&P 500 Stock Overview`
 - `S&P 500 Leaderboards`
 - `S&P 500 Technical Indicators`
+- `S&P 500 Indicator Overview`
 - `S&P 500 Sector Overview`
 - `S&P 500 Industry Overview`
 
@@ -80,11 +81,28 @@ The indicator dashboard combines:
 - catalog metadata for the chosen indicator
 - a latest-value snapshot across the available indicators for the selected ticker
 
+The indicator overview dashboard adds:
+
+- the underlying ticker price series
+- a compact per-ticker table of all persisted indicators
+- the indicator category for quick scanning
+- a purpose column that explains what each indicator is intended to reveal
+- a value-interpretation column that explains how to read small, large, positive, and negative values when that is meaningful
+- the latest available value for each indicator
+
 Indicator-related runtime settings:
 
 - `INDICATORS_ENABLED` enables or disables indicator refreshes entirely
+- `INDICATOR_INCREMENTAL_LOOKBACK_ROWS` sets the bounded row window used for normal incremental indicator refreshes, with a default of `1000`
 - `INDICATOR_REBUILD_ON_STARTUP` forces a full persisted-indicator rebuild for all symbols on container start
 - `INDICATOR_BATCH_SIZE` controls how many symbols are processed per refresh batch
+
+Indicator refresh behavior:
+
+- normal scheduled refreshes are incremental per touched ticker and recompute indicators from a warmup-aware recent row window
+- stock splits force a full rebuild for the affected ticker so split-adjusted history is recomputed cleanly
+- invalid or missing split values are normalized to `0`, so split-triggered rebuilds only happen for real non-zero split ratios
+- startup full loads and startup backfills still rebuild indicators for the affected symbols end to end
 
 ## Fetch Hardening
 
@@ -135,6 +153,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `HISTORICAL_START` | `2020-01-01` | Start date for initial historical load |
 | `BACKFILL_START` | *(unset)* | Optional one-time startup backfill start date for older history on a populated database |
 | `INDICATORS_ENABLED` | `true` | Enable persisted technical-indicator calculation after OHLCV syncs |
+| `INDICATOR_INCREMENTAL_LOOKBACK_ROWS` | `1000` | Row window used for normal incremental indicator refreshes per touched ticker |
 | `INDICATOR_REBUILD_ON_STARTUP` | `false` | Recompute all persisted indicators for all symbols during startup |
 | `INDICATOR_BATCH_SIZE` | `25` | Number of symbols processed per indicator refresh batch |
 

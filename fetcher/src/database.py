@@ -52,12 +52,23 @@ CREATE TABLE IF NOT EXISTS indicator_catalog (
     output_name TEXT NOT NULL,
     display_name TEXT NOT NULL,
     category TEXT NOT NULL,
+    purpose_description TEXT NOT NULL DEFAULT '',
+    value_interpretation TEXT NOT NULL DEFAULT '',
     source_library VARCHAR(32) NOT NULL,
     default_params JSONB NOT NULL DEFAULT '{}'::jsonb,
     warmup_periods INTEGER NOT NULL DEFAULT 0,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE indicator_catalog
+    ADD COLUMN IF NOT EXISTS purpose_description TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE indicator_catalog
+    ADD COLUMN IF NOT EXISTS value_interpretation TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE indicator_catalog
+    DROP COLUMN IF EXISTS insight_description;
 
 CREATE TABLE IF NOT EXISTS stock_indicators (
     symbol VARCHAR(10) NOT NULL,
@@ -222,7 +233,7 @@ def upsert_stock_prices(
 
 def upsert_indicator_catalog(
     config: DatabaseConfig,
-    rows: List[Tuple[str, str, str, str, str, str, object, int, bool]],
+    rows: List[Tuple[str, str, str, str, str, str, str, str, object, int, bool]],
 ) -> int:
     """Upsert indicator definitions into the catalog table."""
     if not rows:
@@ -235,6 +246,8 @@ def upsert_indicator_catalog(
             output_name,
             display_name,
             category,
+            purpose_description,
+            value_interpretation,
             source_library,
             _json_value(default_params),
             warmup_periods,
@@ -246,6 +259,8 @@ def upsert_indicator_catalog(
             output_name,
             display_name,
             category,
+            purpose_description,
+            value_interpretation,
             source_library,
             default_params,
             warmup_periods,
@@ -260,6 +275,8 @@ def upsert_indicator_catalog(
             output_name,
             display_name,
             category,
+            purpose_description,
+            value_interpretation,
             source_library,
             default_params,
             warmup_periods,
@@ -271,6 +288,8 @@ def upsert_indicator_catalog(
             output_name = EXCLUDED.output_name,
             display_name = EXCLUDED.display_name,
             category = EXCLUDED.category,
+            purpose_description = EXCLUDED.purpose_description,
+            value_interpretation = EXCLUDED.value_interpretation,
             source_library = EXCLUDED.source_library,
             default_params = EXCLUDED.default_params,
             warmup_periods = EXCLUDED.warmup_periods,
@@ -292,6 +311,8 @@ def get_indicator_catalog(config: DatabaseConfig, only_enabled: bool = False) ->
             output_name,
             display_name,
             category,
+            purpose_description,
+            value_interpretation,
             source_library,
             default_params,
             warmup_periods,
@@ -318,12 +339,14 @@ def get_indicator_catalog(config: DatabaseConfig, only_enabled: bool = False) ->
                 "output_name": row[2],
                 "display_name": row[3],
                 "category": row[4],
-                "source_library": row[5],
-                "library": row[5],
-                "default_params": _decoded_json_value(row[6], {}),
-                "warmup_periods": row[7],
-                "is_enabled": row[8],
-                "updated_at": row[9],
+                "purpose_description": row[5],
+                "value_interpretation": row[6],
+                "source_library": row[7],
+                "library": row[7],
+                "default_params": _decoded_json_value(row[8], {}),
+                "warmup_periods": row[9],
+                "is_enabled": row[10],
+                "updated_at": row[11],
             }
         )
     return catalog
@@ -367,6 +390,118 @@ def get_stock_price_history(
             rows = cur.fetchall()
             columns = [desc[0] for desc in cur.description or ()]
             return [dict(zip(columns, row)) for row in rows]
+
+
+def get_recent_stock_price_history(
+    config: DatabaseConfig,
+    symbol: str,
+    limit: int,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[dict]:
+    """Fetch the most recent OHLCV rows for a symbol, returned in ascending order."""
+    if limit <= 0:
+        return []
+
+    query = """
+        SELECT
+            timestamp,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            dividends,
+            stock_splits
+        FROM (
+            SELECT
+                timestamp,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                dividends,
+                stock_splits
+            FROM stock_prices
+            WHERE symbol = %s
+    """
+    params: List[object] = [symbol]
+    if start_date is not None:
+        query += " AND timestamp >= %s"
+        params.append(start_date)
+    if end_date is not None:
+        query += " AND timestamp <= %s"
+        params.append(end_date)
+    query += """
+            ORDER BY timestamp DESC
+            LIMIT %s
+        ) recent_prices
+        ORDER BY timestamp ASC
+    """
+    params.append(limit)
+
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description or ()]
+            return [dict(zip(columns, row)) for row in rows]
+
+
+def has_stock_split_in_window(
+    config: DatabaseConfig,
+    symbol: str,
+    start_timestamp: str,
+    end_timestamp: str,
+) -> bool:
+    """Return whether a symbol has any real non-zero stock split rows in the given window."""
+    query = """
+        SELECT EXISTS (
+            SELECT 1
+            FROM stock_prices
+            WHERE symbol = %s
+              AND timestamp >= %s
+              AND timestamp <= %s
+              AND stock_splits IS NOT NULL
+              AND stock_splits::text <> 'NaN'
+              AND stock_splits <> 0
+        )
+    """
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (symbol, start_timestamp, end_timestamp))
+            row = cur.fetchone()
+            return bool(row[0]) if row else False
+
+
+def normalize_invalid_stock_splits(config: DatabaseConfig) -> int:
+    """Rewrite persisted NaN stock split values to zero."""
+    query = """
+        UPDATE stock_prices
+        SET stock_splits = 0
+        WHERE stock_splits IS NOT NULL
+          AND stock_splits::text = 'NaN'
+    """
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            return cur.rowcount
+
+
+def get_max_enabled_indicator_warmup_period(config: DatabaseConfig) -> int:
+    """Return the maximum warmup period across enabled indicators."""
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(MAX(warmup_periods), 0)
+                FROM indicator_catalog
+                WHERE is_enabled = TRUE
+                """
+            )
+            row = cur.fetchone()
+            return int(row[0]) if row and row[0] is not None else 0
 
 
 def upsert_stock_indicators(

@@ -2,6 +2,7 @@
 
 import io
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -95,6 +96,15 @@ def _get_value(row: pd.Series, col: str, ticker: str) -> float:
         return float("nan")
 
 
+def normalize_corporate_action_value(value: object) -> float:
+    """Normalize dividends/split values so missing and non-finite inputs persist as zero."""
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return numeric_value if math.isfinite(numeric_value) else 0.0
+
+
 def _fetch_chunk(
     tickers: List[str],
     start: str,
@@ -131,8 +141,8 @@ def _fetch_chunk(
                 low = _get_value(row, "Low", ticker)
                 vol = _get_value(row, "Volume", ticker)
                 volume = int(vol) if pd.notna(vol) else 0
-                dividends = _get_value(row, "Dividends", ticker) or 0
-                splits = _get_value(row, "Stock Splits", ticker) or 0
+                dividends = normalize_corporate_action_value(_get_value(row, "Dividends", ticker))
+                splits = normalize_corporate_action_value(_get_value(row, "Stock Splits", ticker))
                 records.append({
                     "Symbol": ticker,
                     "Date": dt,

@@ -11,10 +11,15 @@ from apscheduler.triggers.cron import CronTrigger
 from .config import get_database_config, get_fetcher_config, get_indicator_config
 from .database import (
     delete_stock_indicators,
+    get_all_symbols,
+    get_max_enabled_indicator_warmup_period,
+    get_recent_stock_price_history,
     get_stock_price_history,
     get_price_date_bounds,
+    has_stock_split_in_window,
     has_stock_price_data,
     init_schema,
+    normalize_invalid_stock_splits,
     schema_exists,
     upsert_indicator_catalog,
     upsert_stock_indicators,
@@ -22,7 +27,12 @@ from .database import (
     upsert_tickers,
     wait_for_db,
 )
-from .fetcher import FetchResult, fetch_historical_data, fetch_sp500_tickers
+from .fetcher import (
+    FetchResult,
+    fetch_historical_data,
+    fetch_sp500_tickers,
+    normalize_corporate_action_value,
+)
 from .indicators import calculate_indicators, indicators_available
 
 logging.basicConfig(
@@ -31,6 +41,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+INCREMENTAL_LOOKBACK_BUFFER_ROWS = 50
 
 
 def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
@@ -39,7 +50,11 @@ def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
         yield items[index : index + chunk_size]
 
 
-def refresh_indicators(symbols: list[str], force_rebuild: bool = False) -> None:
+def refresh_indicators(
+    symbols: list[str],
+    price_frame: pd.DataFrame | None = None,
+    force_rebuild: bool = False,
+) -> None:
     """Refresh persisted indicators from stored OHLCV history for the given symbols."""
     indicator_config = get_indicator_config()
     if not indicator_config.enabled:
@@ -54,11 +69,25 @@ def refresh_indicators(symbols: list[str], force_rebuild: bool = False) -> None:
 
     db_config = get_database_config()
     unique_symbols = sorted(set(symbols))
-    logger.info(
-        "Refreshing indicators for %d symbols%s",
-        len(unique_symbols),
-        " with full rebuild" if force_rebuild else "",
-    )
+    symbol_windows = _build_symbol_windows(price_frame)
+    incremental_lookback_rows = None
+    if not force_rebuild:
+        max_warmup_period = get_max_enabled_indicator_warmup_period(db_config)
+        incremental_lookback_rows = max(
+            indicator_config.incremental_lookback_rows,
+            max_warmup_period + INCREMENTAL_LOOKBACK_BUFFER_ROWS,
+        )
+        logger.info(
+            "Refreshing indicators for %d symbols incrementally using %d lookback rows "
+            "(floor=%d, max_warmup=%d, buffer=%d)",
+            len(unique_symbols),
+            incremental_lookback_rows,
+            indicator_config.incremental_lookback_rows,
+            max_warmup_period,
+            INCREMENTAL_LOOKBACK_BUFFER_ROWS,
+        )
+    else:
+        logger.info("Refreshing indicators for %d symbols with full rebuild", len(unique_symbols))
 
     for batch_num, batch in enumerate(_chunked(unique_symbols, indicator_config.batch_size), start=1):
         logger.info(
@@ -68,25 +97,65 @@ def refresh_indicators(symbols: list[str], force_rebuild: bool = False) -> None:
         )
         for symbol in batch:
             try:
-                history_rows = get_stock_price_history(db_config, symbol)
-                if not history_rows:
-                    logger.warning("Skipping indicator refresh for %s because no OHLCV history was found", symbol)
-                    continue
+                symbol_window = symbol_windows.get(symbol)
+                split_detected = False
+                if not force_rebuild and symbol_window is not None:
+                    window_start, window_end = symbol_window
+                    split_detected = has_stock_split_in_window(
+                        db_config,
+                        symbol,
+                        _format_timestamp(window_start),
+                        _format_timestamp(window_end),
+                    )
+                    if split_detected:
+                        logger.info(
+                            "Detected stock split for %s in synced window %s to %s; forcing full rebuild",
+                            symbol,
+                            _format_timestamp(window_start),
+                            _format_timestamp(window_end),
+                        )
 
-                price_df = pd.DataFrame(history_rows)
-                price_df["symbol"] = symbol
-                result = calculate_indicators(price_df)
+                rebuild_full_history = force_rebuild or split_detected or symbol_window is None
+                if rebuild_full_history:
+                    history_rows = get_stock_price_history(db_config, symbol)
+                    if not history_rows:
+                        logger.warning("Skipping indicator refresh for %s because no OHLCV history was found", symbol)
+                        continue
 
-                if force_rebuild:
+                    price_df = pd.DataFrame(history_rows)
+                    price_df["symbol"] = symbol
+                    result = calculate_indicators(price_df)
                     delete_stock_indicators(db_config, symbol=symbol)
+                    logger.info(
+                        "Rebuilt indicators for %s using full history (%d rows)",
+                        symbol,
+                        len(price_df),
+                    )
                 else:
-                    min_timestamp = price_df["timestamp"].min()
-                    max_timestamp = price_df["timestamp"].max()
+                    assert incremental_lookback_rows is not None
+                    history_rows = get_recent_stock_price_history(
+                        db_config,
+                        symbol,
+                        incremental_lookback_rows,
+                    )
+                    if not history_rows:
+                        logger.warning("Skipping indicator refresh for %s because no OHLCV history was found", symbol)
+                        continue
+
+                    price_df = pd.DataFrame(history_rows)
+                    price_df["symbol"] = symbol
+                    result = calculate_indicators(price_df)
+                    recompute_start = price_df["timestamp"].min()
                     delete_stock_indicators(
                         db_config,
                         symbol=symbol,
-                        start_timestamp=min_timestamp.isoformat() if hasattr(min_timestamp, "isoformat") else str(min_timestamp),
-                        end_timestamp=max_timestamp.isoformat() if hasattr(max_timestamp, "isoformat") else str(max_timestamp),
+                        start_timestamp=_format_timestamp(recompute_start),
+                    )
+                    logger.info(
+                        "Refreshed indicators for %s incrementally using %d rows from %s",
+                        symbol,
+                        len(price_df),
+                        _format_timestamp(recompute_start),
                     )
 
                 catalog_rows = [
@@ -96,6 +165,8 @@ def refresh_indicators(symbols: list[str], force_rebuild: bool = False) -> None:
                         entry.output_name,
                         entry.display_name,
                         entry.category,
+                        entry.purpose_description,
+                        entry.value_interpretation,
                         entry.library,
                         entry.default_params,
                         entry.warmup_periods,
@@ -153,7 +224,7 @@ def _log_fetch_summary(result: FetchResult, failed_symbol_log_limit: int) -> Non
 def run_scheduled_sync() -> None:
     """Run the scheduled OHLCV sync followed by indicator refresh."""
     result = run_sync(full_historical=False)
-    refresh_indicators(result.successful_symbols)
+    refresh_indicators(result.successful_symbols, price_frame=result.dataframe)
 
 
 def run_sync(
@@ -235,8 +306,8 @@ def run_sync(
                 float(r["Low"]) if r.get("Low") is not None and str(r["Low"]) != "nan" else None,
                 float(r["Close"]),
                 int(r.get("Volume", 0) or 0),
-                float(r.get("Dividends", 0) or 0),
-                float(r.get("Stock Splits", 0) or 0),
+                normalize_corporate_action_value(r.get("Dividends", 0)),
+                normalize_corporate_action_value(r.get("Stock Splits", 0)),
             )
         )
 
@@ -257,15 +328,19 @@ def main() -> None:
 
     if not schema_exists(db_config):
         logger.info("Initializing database schema")
-        init_schema(db_config)
     else:
-        logger.info("Schema already exists")
+        logger.info("Schema already exists; applying idempotent schema updates")
+    init_schema(db_config)
+    normalized_split_rows = normalize_invalid_stock_splits(db_config)
+    if normalized_split_rows:
+        logger.info("Normalized %d persisted stock split rows from NaN to 0", normalized_split_rows)
 
     if has_stock_price_data(db_config):
         logger.info("Existing stock price data found, running startup incremental sync")
         startup_result = run_sync(full_historical=False)
         refresh_indicators(
             startup_result.successful_symbols,
+            price_frame=startup_result.dataframe,
             force_rebuild=indicator_config.rebuild_on_startup,
         )
         min_price_date, max_price_date = get_price_date_bounds(db_config)
@@ -288,7 +363,11 @@ def main() -> None:
                 end_override=min_price_date,
                 mode_label="Running startup backfill",
             )
-            refresh_indicators(backfill_result.successful_symbols, force_rebuild=True)
+            refresh_indicators(
+                backfill_result.successful_symbols,
+                price_frame=backfill_result.dataframe,
+                force_rebuild=True,
+            )
             min_price_date, max_price_date = get_price_date_bounds(db_config)
             logger.info(
                 "Price data range after backfill: %s to %s",
@@ -304,7 +383,11 @@ def main() -> None:
     else:
         logger.info("No stock price data found, running initial historical load (this may take 15-30 minutes)")
         full_result = run_sync(full_historical=True)
-        refresh_indicators(full_result.successful_symbols, force_rebuild=True)
+        refresh_indicators(
+            full_result.successful_symbols,
+            price_frame=full_result.dataframe,
+            force_rebuild=True,
+        )
 
     scheduler = BlockingScheduler()
     scheduler.add_job(
@@ -315,6 +398,30 @@ def main() -> None:
     )
     logger.info("Scheduled daily update with cron: %s", fetcher_config.update_cron)
     scheduler.start()
+
+
+def _build_symbol_windows(price_frame: pd.DataFrame | None) -> dict[str, tuple[pd.Timestamp, pd.Timestamp]]:
+    if price_frame is None or price_frame.empty:
+        return {}
+    if "Symbol" not in price_frame.columns or "Date" not in price_frame.columns:
+        return {}
+
+    windows: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {}
+    for symbol, group in price_frame.groupby("Symbol", sort=True):
+        timestamps = pd.to_datetime(group["Date"], utc=True, errors="coerce").dropna()
+        if timestamps.empty:
+            continue
+        windows[str(symbol)] = (timestamps.min(), timestamps.max())
+    return windows
+
+
+def _format_timestamp(value: object) -> str:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return timestamp.isoformat()
 
 
 if __name__ == "__main__":

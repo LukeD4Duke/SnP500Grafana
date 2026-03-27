@@ -52,6 +52,7 @@ class IndicatorConfig:
     enabled: bool
     rebuild_on_startup: bool
     batch_size: int
+    incremental_lookback_rows: int
 
 
 def get_database_config() -> DatabaseConfig:
@@ -101,4 +102,5 @@ def get_indicator_config() -> IndicatorConfig:
         enabled=_get_bool_env("INDICATORS_ENABLED", True),
         rebuild_on_startup=_get_bool_env("INDICATOR_REBUILD_ON_STARTUP", False),
         batch_size=int(os.environ.get("INDICATOR_BATCH_SIZE", "25")),
+        incremental_lookback_rows=int(os.environ.get("INDICATOR_INCREMENTAL_LOOKBACK_ROWS", "1000")),
     )

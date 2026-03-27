@@ -46,12 +46,23 @@ CREATE TABLE IF NOT EXISTS indicator_catalog (
     output_name TEXT NOT NULL,
     display_name TEXT NOT NULL,
     category TEXT NOT NULL,
+    purpose_description TEXT NOT NULL DEFAULT '',
+    value_interpretation TEXT NOT NULL DEFAULT '',
     source_library VARCHAR(32) NOT NULL,
     default_params JSONB NOT NULL DEFAULT '{}'::jsonb,
     warmup_periods INTEGER NOT NULL DEFAULT 0,
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE indicator_catalog
+    ADD COLUMN IF NOT EXISTS purpose_description TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE indicator_catalog
+    ADD COLUMN IF NOT EXISTS value_interpretation TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE indicator_catalog
+    DROP COLUMN IF EXISTS insight_description;
 
 -- Indicator output rows are kept in a narrow long-form table for flexibility.
 CREATE TABLE IF NOT EXISTS stock_indicators (

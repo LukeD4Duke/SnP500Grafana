@@ -26,6 +26,16 @@
       "title": "Technical Indicators",
       "type": "link",
       "url": "/d/sp500-indicators/sandp-500-technical-indicators"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Indicator Overview",
+      "type": "link",
+      "url": "/d/sp500-indicator-overview/sandp-500-indicator-overview"
     }
   ],
   "liveNow": false,

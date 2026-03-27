@@ -575,6 +575,16 @@ def ticker_detail_dashboard() -> dict:
             "type": "link",
             "url": "/d/sp500-indicators/sandp-500-technical-indicators",
         },
+        {
+            "asDropdown": False,
+            "icon": "dashboard",
+            "includeVars": True,
+            "keepTime": False,
+            "targetBlank": False,
+            "title": "Indicator Overview",
+            "type": "link",
+            "url": "/d/sp500-indicator-overview/sandp-500-indicator-overview",
+        },
     ]
     dashboard["templating"] = {
         "list": [
@@ -981,6 +991,16 @@ def indicator_dashboard() -> dict:
             "title": "Ticker Detail",
             "type": "link",
             "url": "/d/sp500-ticker-detail/sandp-500-ticker-detail",
+        },
+        {
+            "asDropdown": False,
+            "icon": "dashboard",
+            "includeVars": True,
+            "keepTime": False,
+            "targetBlank": False,
+            "title": "Indicator Overview",
+            "type": "link",
+            "url": "/d/sp500-indicator-overview/sandp-500-indicator-overview",
         }
     ]
     dashboard["templating"] = {
@@ -1074,7 +1094,7 @@ def indicator_dashboard() -> dict:
             panel_id=4,
             title="Indicator Metadata",
             sql=(
-                "SELECT indicator_key, display_name, category, source_library, default_params\n"
+                "SELECT indicator_key, display_name, category, purpose_description, value_interpretation, source_library, default_params\n"
                 "FROM indicator_catalog\n"
                 "WHERE indicator_key = '${indicator}'"
             ),
@@ -1108,6 +1128,97 @@ def indicator_dashboard() -> dict:
             y=16,
             w=24,
             h=9,
+        ),
+    ]
+    return dashboard
+
+
+def indicator_overview_dashboard() -> dict:
+    dashboard = base_dashboard(
+        "S&P 500 Indicator Overview",
+        "sp500-indicator-overview",
+        ["sp500", "indicators", "overview", "generated"],
+    )
+    dashboard["time"] = {"from": "now-1y", "to": "now"}
+    dashboard["links"] = [
+        {
+            "asDropdown": False,
+            "icon": "dashboard",
+            "includeVars": True,
+            "keepTime": False,
+            "targetBlank": False,
+            "title": "Ticker Detail",
+            "type": "link",
+            "url": "/d/sp500-ticker-detail/sandp-500-ticker-detail",
+        },
+        {
+            "asDropdown": False,
+            "icon": "dashboard",
+            "includeVars": True,
+            "keepTime": False,
+            "targetBlank": False,
+            "title": "Technical Indicators",
+            "type": "link",
+            "url": "/d/sp500-indicators/sandp-500-technical-indicators",
+        },
+    ]
+    dashboard["templating"] = {
+        "list": [
+            query_variable(
+                "ticker",
+                "Ticker",
+                "SELECT symbol FROM tickers ORDER BY symbol",
+                1,
+                include_all=False,
+            )
+        ]
+    }
+    dashboard["panels"] = [
+        timeseries_panel(
+            panel_id=1,
+            title="Close Price",
+            sql=(
+                "SELECT timestamp AS time, close AS \"Close Price\"\n"
+                "FROM stock_prices\n"
+                "WHERE symbol = '${ticker}'\n"
+                "AND $__timeFilter(timestamp)\n"
+                "ORDER BY timestamp"
+            ),
+            x=0,
+            y=0,
+            w=24,
+            h=8,
+            unit="currencyUSD",
+            draw_style="line",
+            fill_opacity=10,
+            line_width=2,
+        ),
+        table_panel(
+            panel_id=2,
+            title="Indicator Snapshot",
+            sql=(
+                "WITH latest AS (\n"
+                "    SELECT DISTINCT ON (si.indicator_key)\n"
+                "        si.indicator_key,\n"
+                "        si.value_numeric\n"
+                "    FROM stock_indicators si\n"
+                "    WHERE si.symbol = '${ticker}'\n"
+                "    ORDER BY si.indicator_key, si.timestamp DESC\n"
+                ")\n"
+                "SELECT\n"
+                "    COALESCE(ic.display_name, latest.indicator_key) AS indicator_name,\n"
+                "    COALESCE(ic.category, 'uncategorized') AS category,\n"
+                "    COALESCE(NULLIF(ic.purpose_description, ''), 'Provides a technical view of the ticker''s recent behavior.') AS purpose,\n"
+                "    COALESCE(NULLIF(ic.value_interpretation, ''), 'Read this value relative to the ticker''s recent history or the indicator''s usual band.') AS value_interpretation,\n"
+                "    latest.value_numeric AS latest_value\n"
+                "FROM latest\n"
+                "LEFT JOIN indicator_catalog ic ON ic.indicator_key = latest.indicator_key\n"
+                "ORDER BY category, indicator_name"
+            ),
+            x=0,
+            y=8,
+            w=24,
+            h=14,
         ),
     ]
     return dashboard
@@ -1290,6 +1401,7 @@ def main() -> None:
     write_dashboard("sp500-stock-overview.json", stock_overview_dashboard())
     write_dashboard("sp500-leaderboards.json", leaderboard_dashboard())
     write_dashboard("sp500-indicators.json", indicator_dashboard())
+    write_dashboard("sp500-indicator-overview.json", indicator_overview_dashboard())
     write_dashboard("sp500-sector-overview.json", sector_overview_dashboard())
     write_dashboard("sp500-industry-overview.json", industry_overview_dashboard())
 
