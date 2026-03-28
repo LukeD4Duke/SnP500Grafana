@@ -40,6 +40,7 @@ class FetcherConfig:
     symbol_retry_count: int = 2
     recovery_chunk_size: int = 5
     failed_symbol_log_limit: int = 20
+    startup_post_sync_mode: str = "background"
     backfill_start: Optional[str] = None
 
 
@@ -71,6 +72,15 @@ class ReportingConfig:
     monthly_cron: str
 
 
+@dataclass
+class ReportExportConfig:
+    """Manual report export service configuration."""
+
+    output_dir: str
+    public_url: str
+    grafana_internal_url: str
+
+
 def get_database_config() -> DatabaseConfig:
     """Load database configuration from environment."""
     password = os.environ.get("DB_PASSWORD")
@@ -90,6 +100,13 @@ def get_database_config() -> DatabaseConfig:
 
 def get_fetcher_config() -> FetcherConfig:
     """Load fetcher configuration from environment."""
+    startup_post_sync_mode = os.environ.get("STARTUP_POST_SYNC_MODE", "background").strip().lower()
+    if startup_post_sync_mode not in {"background", "blocking"}:
+        raise ValueError(
+            "STARTUP_POST_SYNC_MODE must be either 'background' or 'blocking'. "
+            f"Received: {startup_post_sync_mode!r}"
+        )
+
     return FetcherConfig(
         chunk_size=int(os.environ.get("YFINANCE_CHUNK_SIZE", "50")),
         symbol_retry_count=int(os.environ.get("YFINANCE_SYMBOL_RETRIES", "2")),
@@ -97,6 +114,7 @@ def get_fetcher_config() -> FetcherConfig:
         failed_symbol_log_limit=int(os.environ.get("YFINANCE_FAILED_SYMBOL_LOG_LIMIT", "20")),
         delay_seconds=float(os.environ.get("YFINANCE_DELAY_SEC", "2.5")),
         historical_start=os.environ.get("HISTORICAL_START", "2020-01-01"),
+        startup_post_sync_mode=startup_post_sync_mode,
         backfill_start=os.environ.get("BACKFILL_START") or None,
         update_cron=os.environ.get("UPDATE_CRON", "0 23 * * *"),
         max_retries=int(os.environ.get("YFINANCE_MAX_RETRIES", "5")),
@@ -141,4 +159,13 @@ def get_reporting_config() -> ReportingConfig:
         output_dir=os.environ.get("REPORT_OUTPUT_DIR", "/app/reports"),
         weekly_cron=os.environ.get("REPORT_WEEKLY_CRON", "15 0 * * 1"),
         monthly_cron=os.environ.get("REPORT_MONTHLY_CRON", "30 0 1 * *"),
+    )
+
+
+def get_report_export_config() -> ReportExportConfig:
+    """Load manual export service configuration from environment."""
+    return ReportExportConfig(
+        output_dir=os.environ.get("REPORT_OUTPUT_DIR", "/app/reports"),
+        public_url=os.environ.get("REPORT_UI_PUBLIC_URL", "http://localhost:3002").rstrip("/"),
+        grafana_internal_url=os.environ.get("GRAFANA_INTERNAL_URL", "http://grafana:3000").rstrip("/"),
     )

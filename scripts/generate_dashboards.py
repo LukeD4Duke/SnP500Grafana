@@ -2,29 +2,60 @@
 
 from __future__ import annotations
 
+import os
 import json
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_DIR = ROOT / "grafana" / "dashboards"
 DATASOURCE = {"type": "postgres", "uid": "timescaledb"}
 TIME_RANGE = {"from": "now-1y", "to": "now"}
+ALL_SENTINEL = "__all"
+REPORT_UI_PUBLIC_URL = os.environ.get("REPORT_UI_PUBLIC_URL", "http://localhost:3002").rstrip("/")
+TIMEFRAME_VALUES = ["daily", "weekly", "monthly"]
+REPORT_KIND_VALUES = ["weekly", "monthly"]
+SECTOR_FILTER_SQL = (
+    f"(${{sector:sqlstring}} = '{ALL_SENTINEL}' OR COALESCE(t.sector, '') = ${{sector:sqlstring}})"
+)
+TICKER_VARIABLE_SECTOR_FILTER_SQL = (
+    f"(${{sector:sqlstring}} = '{ALL_SENTINEL}' OR COALESCE(sector, '') = ${{sector:sqlstring}})"
+)
 
 
-def base_dashboard(title: str, uid: str, tags: list[str], links: list[dict] | None = None) -> dict:
+@dataclass(frozen=True)
+class DashboardFile:
+    filename: str
+    builder: Callable[[], dict]
+
+
+@dataclass(frozen=True)
+class AnalyticsDashboardSpec:
+    uid: str
+    title: str
+    tags: list[str]
+    bar_title: str
+    bar_sql: str
+    table_title: str
+    table_sql: str
+
+
+def base_dashboard(title: str, uid: str, tags: list[str]) -> dict:
     return {
         "annotations": {"list": []},
         "editable": True,
         "fiscalYearStartMonth": 0,
         "graphTooltip": 1,
         "id": None,
-        "links": links or [],
+        "links": dashboard_links(uid),
         "liveNow": False,
         "panels": [],
         "refresh": "30s",
         "schemaVersion": 39,
         "style": "dark",
         "tags": tags,
+        "templating": {"list": []},
         "time": TIME_RANGE,
         "timepicker": {},
         "timezone": "browser",
@@ -35,131 +66,43 @@ def base_dashboard(title: str, uid: str, tags: list[str], links: list[dict] | No
     }
 
 
-def query_variable(name: str, label: str, query: str, refresh: int) -> dict:
+def dashboard_link(uid: str, title: str) -> dict:
     return {
-        "current": {},
-        "datasource": DATASOURCE,
-        "definition": query,
-        "hide": 0,
-        "includeAll": False,
-        "label": label,
-        "multi": False,
-        "name": name,
-        "options": [],
-        "query": query,
-        "refresh": refresh,
-        "regex": "",
-        "skipUrlSync": False,
-        "sort": 1,
-        "type": "query",
-    }
-
-
-def custom_variable(name: str, label: str, options: list[str], current: str) -> dict:
-    return {
-        "current": {"selected": True, "text": current.title(), "value": current},
-        "hide": 0,
-        "includeAll": False,
-        "label": label,
-        "multi": False,
-        "name": name,
-        "options": [
-            {"selected": option == current, "text": option.title(), "value": option}
-            for option in options
-        ],
-        "query": ",".join(options),
-        "skipUrlSync": False,
-        "type": "custom",
-    }
-
-
-def _table_defaults() -> dict:
-    return {
-        "fieldConfig": {
-            "defaults": {
-                "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": False},
-                "mappings": [],
-                "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
-            },
-            "overrides": [],
-        },
-        "targets": [
-            {
-                "datasource": DATASOURCE,
-                "editorMode": "code",
-                "format": "table",
-                "rawQuery": True,
-                "refId": "A",
-            }
-        ],
-        "type": "table",
-    }
-
-
-def table_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: int, h: int, show_header: bool = True) -> dict:
-    panel = _table_defaults()
-    panel["datasource"] = DATASOURCE
-    panel["gridPos"] = {"h": h, "w": w, "x": x, "y": y}
-    panel["id"] = panel_id
-    panel["options"] = {"cellHeight": "sm", "footer": {"show": False}, "showHeader": show_header}
-    panel["targets"][0]["rawSql"] = sql
-    panel["title"] = title
-    return panel
-
-
-def stat_panel(
-    *,
-    panel_id: int,
-    title: str,
-    sql: str,
-    x: int,
-    y: int,
-    w: int,
-    h: int,
-    unit: str = "none",
-    decimals: int | None = None,
-) -> dict:
-    defaults: dict = {
-        "color": {"mode": "thresholds"},
-        "mappings": [],
-        "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
-        "unit": unit,
-    }
-    if decimals is not None:
-        defaults["decimals"] = decimals
-    return {
-        "datasource": DATASOURCE,
-        "fieldConfig": {"defaults": defaults, "overrides": []},
-        "gridPos": {"h": h, "w": w, "x": x, "y": y},
-        "id": panel_id,
-        "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "orientation": "auto",
-            "percentChangeColorMode": "standard",
-            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
-            "showPercentChange": False,
-            "textMode": "auto",
-            "wideLayout": True,
-        },
-        "targets": [
-            {
-                "datasource": DATASOURCE,
-                "editorMode": "code",
-                "format": "table",
-                "rawQuery": True,
-                "rawQueryText": sql,
-                "rawSql": sql,
-                "refId": "A",
-            }
-        ],
+        "asDropdown": False,
+        "icon": "dashboard",
+        "includeVars": True,
+        "keepTime": False,
+        "targetBlank": False,
         "title": title,
-        "type": "stat",
+        "type": "link",
+        "url": f"/d/{uid}",
     }
 
 
-def query_variable(name: str, label: str, query: str, refresh: int, include_all: bool = True) -> dict:
+def dashboard_links(current_uid: str) -> list[dict]:
+    all_links = [
+        ("sp500-ticker-detail", "Ticker Detail"),
+        ("sp500-leaderboards", "Leaderboards"),
+        ("sp500-trend-regime", "Trend Regime"),
+        ("sp500-momentum", "Momentum"),
+        ("sp500-volatility-risk", "Volatility and Risk"),
+        ("sp500-volume-confirmation", "Volume Confirmation"),
+        ("sp500-breakout-breakdown", "Breakout and Breakdown"),
+        ("sp500-market-structure", "Market Structure"),
+        ("sp500-relative-strength", "Relative Strength"),
+        ("sp500-mean-reversion", "Mean Reversion"),
+    ]
+    return [dashboard_link(uid, title) for uid, title in all_links if uid != current_uid]
+
+
+def query_variable(
+    name: str,
+    label: str,
+    query: str,
+    refresh: int,
+    *,
+    include_all: bool = True,
+) -> dict:
     variable = {
         "current": {"selected": True, "text": "All", "value": ALL_SENTINEL} if include_all else {},
         "datasource": DATASOURCE,
@@ -200,54 +143,12 @@ def custom_variable(name: str, label: str, values: list[str], current: str) -> d
     }
 
 
-def ticker_link_override(field_name: str = "ticker") -> dict:
-    return {
-        "matcher": {"id": "byName", "options": field_name},
-        "properties": [
-            {
-                "id": "links",
-                "value": [
-                    {
-                        "targetBlank": False,
-                        "title": "Open ticker detail",
-                        "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}",
-                    }
-                ],
-            }
-        ],
-    }
-
-
-def dashboard_link(uid: str, title: str) -> dict:
-    return {
-        "asDropdown": False,
-        "icon": "dashboard",
-        "includeVars": True,
-        "keepTime": False,
-        "targetBlank": False,
-        "title": title,
-        "type": "link",
-        "url": f"/d/{uid}",
-    }
-
-
-def apply_dashboard_links(dashboard: dict, current_uid: str) -> None:
-    links = [
-        ("sp500-ticker-detail", "Ticker Detail"),
-        ("sp500-leaderboards", "Universe Ranking"),
-        ("sp500-trend-regime", "Trend Regime"),
-        ("sp500-momentum", "Momentum"),
-        ("sp500-volatility-risk", "Volatility and Risk"),
-        ("sp500-volume-confirmation", "Volume Confirmation"),
-        ("sp500-breakout-breakdown", "Breakout and Breakdown"),
-        ("sp500-market-structure", "Market Structure"),
-        ("sp500-relative-strength", "Relative Strength"),
-        ("sp500-mean-reversion", "Mean Reversion"),
-    ]
-    dashboard["links"] = [dashboard_link(uid, title) for uid, title in links if uid != current_uid]
-
-
-def analytics_variables(*, include_ticker: bool = False, include_sector: bool = True, include_report_kind: bool = False) -> list[dict]:
+def analytics_variables(
+    *,
+    include_ticker: bool = False,
+    include_sector: bool = True,
+    include_report_kind: bool = False,
+) -> list[dict]:
     variables = [custom_variable("timeframe", "Timeframe", TIMEFRAME_VALUES, "daily")]
     if include_sector:
         variables.append(
@@ -266,7 +167,7 @@ def analytics_variables(*, include_ticker: bool = False, include_sector: bool = 
                 (
                     "SELECT name || ' (' || symbol || ')' AS __text, symbol AS __value "
                     "FROM tickers "
-                    f"WHERE (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR sector IN (${{sector:sqlstring}})) "
+                    f"WHERE {TICKER_VARIABLE_SECTOR_FILTER_SQL} "
                     "ORDER BY symbol"
                 ),
                 2,
@@ -274,39 +175,41 @@ def analytics_variables(*, include_ticker: bool = False, include_sector: bool = 
             )
         )
     if include_report_kind:
-        variables.append(custom_variable("report_kind", "Report", ["weekly", "monthly"], "weekly"))
+        variables.append(custom_variable("report_kind", "Report", REPORT_KIND_VALUES, "weekly"))
     return variables
 
 
-def latest_snapshot_cte(table: str) -> str:
+def latest_snapshot_cte(table: str, *, filters: list[str] | None = None) -> str:
+    where_clause = ""
+    if filters:
+        where_clause = " WHERE " + " AND ".join(filters)
     return (
         "WITH latest_snapshot AS (\n"
-        f"    SELECT MAX(snapshot_date) AS snapshot_date FROM {table} WHERE timeframe = '${{timeframe}}'\n"
+        f"    SELECT MAX(snapshot_date) AS snapshot_date FROM {table}{where_clause}\n"
         ")\n"
     )
 
 
-def latest_report_cte() -> str:
-    return (
-        "WITH latest_report AS (\n"
-        "    SELECT MAX(snapshot_date) AS snapshot_date\n"
-        "    FROM report_snapshots\n"
-        "    WHERE timeframe = '${timeframe}' AND report_kind = '${report_kind}'\n"
-        ")\n"
-    )
-
-
-def latest_signal_sql(select_sql: str, *, extra_filters: str = "", order_by: str = "", limit: int | None = None) -> str:
+def latest_signal_sql(
+    select_sql: str,
+    *,
+    extra_filters: list[str] | None = None,
+    order_by: str = "",
+    limit: int | None = None,
+) -> str:
+    filters = ["ss.timeframe = '${timeframe}'", SECTOR_FILTER_SQL]
+    if extra_filters:
+        filters.extend(extra_filters)
     sql = (
-        latest_snapshot_cte("signal_snapshots")
+        latest_snapshot_cte("signal_snapshots", filters=["timeframe = '${timeframe}'"])
         + "SELECT "
         + select_sql
         + "\nFROM signal_snapshots ss\n"
         + "JOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date\n"
         + "LEFT JOIN tickers t ON t.symbol = ss.symbol\n"
-        + "WHERE ss.timeframe = '${timeframe}'\n"
-        + f"  AND (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR t.sector IN (${{sector:sqlstring}}))\n"
-        + extra_filters
+        + "WHERE "
+        + " AND ".join(filters)
+        + "\n"
     )
     if order_by:
         sql += f"ORDER BY {order_by}\n"
@@ -315,17 +218,26 @@ def latest_signal_sql(select_sql: str, *, extra_filters: str = "", order_by: str
     return sql
 
 
-def latest_rank_sql(select_sql: str, *, extra_filters: str = "", order_by: str = "", limit: int | None = None) -> str:
+def latest_rank_sql(
+    select_sql: str,
+    *,
+    extra_filters: list[str] | None = None,
+    order_by: str = "",
+    limit: int | None = None,
+) -> str:
+    filters = ["rs.timeframe = '${timeframe}'", SECTOR_FILTER_SQL]
+    if extra_filters:
+        filters.extend(extra_filters)
     sql = (
-        latest_snapshot_cte("rank_snapshots")
+        latest_snapshot_cte("rank_snapshots", filters=["timeframe = '${timeframe}'"])
         + "SELECT "
         + select_sql
         + "\nFROM rank_snapshots rs\n"
         + "JOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\n"
         + "LEFT JOIN tickers t ON t.symbol = rs.symbol\n"
-        + "WHERE rs.timeframe = '${timeframe}'\n"
-        + f"  AND (${{sector:sqlstring}} = '{ALL_SENTINEL}' OR t.sector IN (${{sector:sqlstring}}))\n"
-        + extra_filters
+        + "WHERE "
+        + " AND ".join(filters)
+        + "\n"
     )
     if order_by:
         sql += f"ORDER BY {order_by}\n"
@@ -336,7 +248,7 @@ def latest_rank_sql(select_sql: str, *, extra_filters: str = "", order_by: str =
 
 def latest_breadth_sql(select_sql: str) -> str:
     return (
-        latest_snapshot_cte("market_breadth_snapshots")
+        latest_snapshot_cte("market_breadth_snapshots", filters=["timeframe = '${timeframe}'"])
         + "SELECT "
         + select_sql
         + "\nFROM market_breadth_snapshots mbs\n"
@@ -345,20 +257,179 @@ def latest_breadth_sql(select_sql: str) -> str:
     )
 
 
-def ranked_bar_overrides() -> list[dict]:
-    return [
-        {
-            "matcher": {"id": "byName", "options": "company_name"},
-            "properties": [{"id": "custom.hideFrom", "value": {"legend": True, "tooltip": False, "viz": True}}],
-        },
-        {
-            "matcher": {"id": "byName", "options": "color_code"},
-            "properties": [{"id": "custom.hideFrom", "value": {"legend": True, "tooltip": True, "viz": True}}],
-        },
-    ]
+def latest_report_sql(select_sql: str) -> str:
+    return (
+        latest_snapshot_cte(
+            "report_snapshots",
+            filters=["timeframe = '${timeframe}'", "report_kind = '${report_kind}'"],
+        )
+        + "SELECT "
+        + select_sql
+        + "\nFROM report_snapshots rs\n"
+        + "JOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\n"
+        + "WHERE rs.timeframe = '${timeframe}' AND rs.report_kind = '${report_kind}'"
+    )
 
 
-def timeseries_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: int, h: int, unit: str = "none") -> dict:
+def ticker_link_override(field_name: str = "ticker") -> dict:
+    return {
+        "matcher": {"id": "byName", "options": field_name},
+        "properties": [
+            {
+                "id": "links",
+                "value": [
+                    {
+                        "targetBlank": False,
+                        "title": "Open ticker detail",
+                        "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}",
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def table_panel(
+    *,
+    panel_id: int,
+    title: str,
+    sql: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    show_header: bool = True,
+    overrides: list[dict] | None = None,
+) -> dict:
+    return {
+        "datasource": DATASOURCE,
+        "fieldConfig": {
+            "defaults": {
+                "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": False},
+                "mappings": [],
+                "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
+            },
+            "overrides": overrides or [],
+        },
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": panel_id,
+        "options": {"cellHeight": "sm", "footer": {"show": False}, "showHeader": show_header},
+        "targets": [
+            {
+                "datasource": DATASOURCE,
+                "editorMode": "code",
+                "format": "table",
+                "rawQuery": True,
+                "rawSql": sql,
+                "refId": "A",
+            }
+        ],
+        "title": title,
+        "type": "table",
+    }
+
+
+def text_panel(
+    *,
+    panel_id: int,
+    title: str,
+    content: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    mode: str = "html",
+) -> dict:
+    return {
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": panel_id,
+        "options": {"content": content, "mode": mode},
+        "transparent": True,
+        "title": title,
+        "type": "text",
+    }
+
+
+def stat_panel(
+    *,
+    panel_id: int,
+    title: str,
+    sql: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    unit: str = "none",
+    decimals: int | None = None,
+) -> dict:
+    defaults: dict[str, object] = {
+        "color": {"mode": "thresholds"},
+        "mappings": [],
+        "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
+        "unit": unit,
+    }
+    if decimals is not None:
+        defaults["decimals"] = decimals
+    return {
+        "datasource": DATASOURCE,
+        "fieldConfig": {"defaults": defaults, "overrides": []},
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": panel_id,
+        "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "orientation": "auto",
+            "percentChangeColorMode": "standard",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "showPercentChange": False,
+            "textMode": "auto",
+            "wideLayout": True,
+        },
+        "targets": [
+            {
+                "datasource": DATASOURCE,
+                "editorMode": "code",
+                "format": "table",
+                "rawQuery": True,
+                "rawSql": sql,
+                "refId": "A",
+            }
+        ],
+        "title": title,
+        "type": "stat",
+    }
+
+
+def link_override(field_name: str, title: str) -> dict:
+    return {
+        "matcher": {"id": "byName", "options": field_name},
+        "properties": [
+            {
+                "id": "links",
+                "value": [
+                    {
+                        "targetBlank": True,
+                        "title": title,
+                        "url": "${__value.raw}",
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def timeseries_panel(
+    *,
+    panel_id: int,
+    title: str,
+    sql: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    unit: str = "none",
+) -> dict:
     return {
         "datasource": DATASOURCE,
         "fieldConfig": {
@@ -409,7 +480,18 @@ def timeseries_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: 
     }
 
 
-def bar_chart_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: int, h: int, x_field: str) -> dict:
+def bar_chart_panel(
+    *,
+    panel_id: int,
+    title: str,
+    sql: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    x_field: str,
+    overrides: list[dict] | None = None,
+) -> dict:
     return {
         "datasource": DATASOURCE,
         "fieldConfig": {
@@ -430,7 +512,7 @@ def bar_chart_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: i
                 "mappings": [],
                 "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
             },
-            "overrides": [],
+            "overrides": overrides or [],
         },
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "id": panel_id,
@@ -465,85 +547,57 @@ def bar_chart_panel(*, panel_id: int, title: str, sql: str, x: int, y: int, w: i
     }
 
 
-def dashboard_links() -> list[dict]:
+def market_overview_panels() -> list[dict]:
     return [
-        {
-            "asDropdown": False,
-            "icon": "dashboard",
-            "includeVars": False,
-            "keepTime": False,
-            "targetBlank": False,
-            "title": "Ticker Detail",
-            "type": "link",
-            "url": "/d/sp500-ticker-detail/sandp-500-ticker-detail",
-        },
-        {
-            "asDropdown": False,
-            "icon": "dashboard",
-            "includeVars": False,
-            "keepTime": False,
-            "targetBlank": False,
-            "title": "Leaderboards",
-            "type": "link",
-            "url": "/d/sp500-leaderboards/sandp-500-leaderboards",
-        },
+        stat_panel(
+            panel_id=1,
+            title="Average Final Score",
+            sql=latest_breadth_sql("avg_final_score AS value"),
+            x=0,
+            y=0,
+            w=6,
+            h=4,
+            decimals=1,
+        ),
+        stat_panel(
+            panel_id=2,
+            title="Bullish Count",
+            sql=latest_breadth_sql("bullish_count AS value"),
+            x=6,
+            y=0,
+            w=6,
+            h=4,
+        ),
+        stat_panel(
+            panel_id=3,
+            title="Bearish Count",
+            sql=latest_breadth_sql("bearish_count AS value"),
+            x=12,
+            y=0,
+            w=6,
+            h=4,
+        ),
+        stat_panel(
+            panel_id=4,
+            title="% Above EMA50",
+            sql=latest_breadth_sql("pct_above_ema50 AS value"),
+            x=18,
+            y=0,
+            w=6,
+            h=4,
+            unit="percentunit",
+            decimals=2,
+        ),
     ]
-
-
-def latest_signal_cte() -> str:
-    return (
-        "WITH latest_snapshot AS (\n"
-        "    SELECT MAX(snapshot_date) AS snapshot_date\n"
-        "    FROM signal_snapshots WHERE timeframe = '${timeframe}'\n"
-        ")\n"
-    )
-
-
-def latest_rank_cte() -> str:
-    return (
-        "WITH latest_snapshot AS (\n"
-        "    SELECT MAX(snapshot_date) AS snapshot_date\n"
-        "    FROM rank_snapshots WHERE timeframe = '${timeframe}'\n"
-        ")\n"
-    )
-
-
-def latest_breadth_cte() -> str:
-    return (
-        "WITH latest_snapshot AS (\n"
-        "    SELECT MAX(snapshot_date) AS snapshot_date\n"
-        "    FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'\n"
-        ")\n"
-    )
-
-
-def latest_report_cte() -> str:
-    return (
-        "WITH latest_snapshot AS (\n"
-        "    SELECT MAX(snapshot_date) AS snapshot_date\n"
-        "    FROM report_snapshots WHERE timeframe = '${timeframe}'\n"
-        ")\n"
-    )
 
 
 def ticker_detail_dashboard() -> dict:
     dashboard = base_dashboard(
         "S&P 500 Ticker Detail",
         "sp500-ticker-detail",
-        ["sp500", "analytics", "generated"],
-        dashboard_links(),
+        ["sp500", "ticker-detail", "generated"],
     )
-    dashboard["templating"] = {
-        "list": [
-            query_variable(
-                "ticker",
-                "Ticker",
-                "SELECT name || ' (' || symbol || ')' AS __text, symbol AS __value FROM tickers ORDER BY symbol",
-                1,
-            ),
-            custom_variable("timeframe", "Timeframe", ["daily", "weekly", "monthly"], "daily"),
-        ]
-    }
+    dashboard["templating"]["list"] = analytics_variables(include_ticker=True)
     dashboard["panels"] = [
         table_panel(
             panel_id=1,
@@ -572,10 +626,11 @@ def ticker_detail_dashboard() -> dict:
         ),
         stat_panel(
             panel_id=3,
-            title="Latest Final Score",
+            title="Final Score",
             sql=(
                 "SELECT final_score AS value FROM signal_snapshots "
-                "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date DESC LIMIT 1"
+                "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
+                "ORDER BY snapshot_date DESC LIMIT 1"
             ),
             x=12,
             y=0,
@@ -585,10 +640,11 @@ def ticker_detail_dashboard() -> dict:
         ),
         stat_panel(
             panel_id=4,
-            title="Latest Regime",
+            title="Recommendation",
             sql=(
-                "SELECT regime_label AS value FROM signal_snapshots "
-                "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date DESC LIMIT 1"
+                "SELECT recommendation_label AS value FROM signal_snapshots "
+                "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
+                "ORDER BY snapshot_date DESC LIMIT 1"
             ),
             x=18,
             y=0,
@@ -597,7 +653,7 @@ def ticker_detail_dashboard() -> dict:
         ),
         timeseries_panel(
             panel_id=5,
-            title="Price History",
+            title="Close Price",
             sql=(
                 "SELECT timestamp AS time, close AS \"Close\" "
                 "FROM stock_prices WHERE symbol = '${ticker}' AND $__timeFilter(timestamp) ORDER BY timestamp"
@@ -610,11 +666,13 @@ def ticker_detail_dashboard() -> dict:
         ),
         timeseries_panel(
             panel_id=6,
-            title="Analytics Score History",
+            title="Score History",
             sql=(
                 "SELECT snapshot_date::timestamp AS time, final_score AS \"Final Score\", trend_score AS \"Trend\", "
                 "momentum_score AS \"Momentum\", relative_strength_score AS \"Relative Strength\" "
-                "FROM signal_snapshots WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date"
+                "FROM signal_snapshots "
+                "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
+                "ORDER BY snapshot_date"
             ),
             x=0,
             y=12,
@@ -623,13 +681,15 @@ def ticker_detail_dashboard() -> dict:
         ),
         table_panel(
             panel_id=7,
-            title="Latest Snapshot Interpretation",
+            title="Analytics Snapshot",
             sql=(
                 "SELECT snapshot_date, timeframe, close, volume, final_score, trend_score, momentum_score, "
                 "volume_score, relative_strength_score, structure_score, mean_reversion_score, "
-                "volatility_risk_score, regime_label, recommendation_label, breakout_flag, breakdown_flag, "
-                "overbought_flag, oversold_flag, trend_alignment_flag, data_quality_flag, drivers_json "
-                "FROM signal_snapshots WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
+                "volatility_risk_score, risk_penalty, regime_label, recommendation_label, "
+                "breakout_flag, breakdown_flag, overbought_flag, oversold_flag, trend_alignment_flag, "
+                "data_quality_flag "
+                "FROM signal_snapshots "
+                "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
                 "ORDER BY snapshot_date DESC LIMIT 1"
             ),
             x=0,
@@ -639,11 +699,22 @@ def ticker_detail_dashboard() -> dict:
         ),
         table_panel(
             panel_id=8,
-            title="Latest Stored Reports",
+            title="Key Drivers",
             sql=(
-                "SELECT snapshot_date, report_kind, title, summary_text, risk_text, storage_path "
-                "FROM report_snapshots WHERE symbol = '__MARKET__' "
-                "ORDER BY snapshot_date DESC, report_kind LIMIT 6"
+                "WITH latest_signal AS ("
+                "    SELECT snapshot_date, drivers_json "
+                "    FROM signal_snapshots "
+                "    WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
+                "    ORDER BY snapshot_date DESC LIMIT 1"
+                ") "
+                "SELECT "
+                "    latest_signal.snapshot_date, "
+                "    COALESCE(driver.value->>'label', driver.value->>'metric', driver.value->>'name', 'driver') AS driver, "
+                "    COALESCE(driver.value->>'state', '') AS state, "
+                "    COALESCE(NULLIF(driver.value->>'score', ''), driver.value->>'value', '') AS score, "
+                "    COALESCE(driver.value->>'detail', driver.value->>'explanation', '') AS detail "
+                "FROM latest_signal "
+                "CROSS JOIN LATERAL jsonb_array_elements(latest_signal.drivers_json) AS driver(value)"
             ),
             x=0,
             y=28,
@@ -659,83 +730,126 @@ def leaderboard_dashboard() -> dict:
         "S&P 500 Leaderboards",
         "sp500-leaderboards",
         ["sp500", "leaderboards", "generated"],
-        dashboard_links(),
     )
-    dashboard["templating"] = {"list": [custom_variable("timeframe", "Timeframe", ["daily", "weekly", "monthly"], "daily")]}
+    dashboard["templating"]["list"] = analytics_variables(include_sector=True, include_report_kind=True)
     dashboard["panels"] = [
-        bar_chart_panel(
+        text_panel(
             panel_id=1,
-            title="Top 20 Bullish Scores",
-            sql=(
-                latest_rank_cte()
-                + "SELECT rs.symbol AS ticker, rs.final_score AS score "
-                  "FROM rank_snapshots rs JOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date "
-                  "WHERE rs.timeframe = '${timeframe}' ORDER BY rs.bull_rank ASC LIMIT 20"
+            title="Monthly Report",
+            content=(
+                "<div style=\"display:flex;flex-direction:column;gap:12px;height:100%;justify-content:center;"
+                "padding:8px 4px;\">"
+                "<div style=\"font-size:18px;font-weight:700;letter-spacing:0.01em;\">Generate Monthly Report</div>"
+                "<div style=\"color:#a5adba;line-height:1.4;\">"
+                "Open the report UI, generate the latest monthly export, and download HTML or PDF artifacts."
+                "</div>"
+                f"<a href=\"{REPORT_UI_PUBLIC_URL}/monthly-report?autostart=1\" "
+                "style=\"display:inline-flex;align-items:center;justify-content:center;gap:8px;"
+                "padding:12px 16px;border-radius:10px;background:linear-gradient(135deg,#1f78c1,#165a96);"
+                "color:#ffffff;font-weight:700;text-decoration:none;width:max-content;\">"
+                "Generate Monthly Report"
+                "</a>"
+                "</div>"
             ),
             x=0,
             y=0,
+            w=8,
+            h=5,
+        ),
+        table_panel(
+            panel_id=2,
+            title="Latest Manual Export",
+            sql=(
+                "WITH latest_job AS ("
+                "    SELECT job_id, report_kind, timeframe, scope, status, snapshot_date, created_at, started_at, "
+                "           completed_at, error_message, html_download_url, pdf_download_url "
+                "    FROM report_export_jobs "
+                "    WHERE report_kind = 'monthly' "
+                "      AND timeframe = 'monthly' "
+                "      AND scope = 'full_market' "
+                "    ORDER BY created_at DESC, job_id DESC "
+                "    LIMIT 1"
+                ") "
+                "SELECT job_id, report_kind, timeframe, scope, status, snapshot_date, created_at, started_at, "
+                "       completed_at, error_message, html_download_url, pdf_download_url "
+                "FROM latest_job"
+            ),
+            x=8,
+            y=0,
+            w=16,
+            h=5,
+            overrides=[
+                link_override("html_download_url", "Download HTML"),
+                link_override("pdf_download_url", "Download PDF"),
+            ],
+        ),
+        bar_chart_panel(
+            panel_id=3,
+            title="Top Bullish Ranks",
+            sql=latest_rank_sql(
+                "rs.symbol AS ticker, rs.final_score AS score",
+                order_by="rs.bull_rank ASC, rs.symbol",
+                limit=20,
+            ),
+            x=0,
+            y=5,
             w=12,
             h=9,
             x_field="ticker",
         ),
         bar_chart_panel(
-            panel_id=2,
-            title="Top 20 Bearish Scores",
-            sql=(
-                latest_rank_cte()
-                + "SELECT rs.symbol AS ticker, rs.final_score AS score "
-                  "FROM rank_snapshots rs JOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date "
-                  "WHERE rs.timeframe = '${timeframe}' ORDER BY rs.bear_rank ASC LIMIT 20"
+            panel_id=4,
+            title="Top Bearish Ranks",
+            sql=latest_rank_sql(
+                "rs.symbol AS ticker, rs.final_score AS score",
+                order_by="rs.bear_rank ASC, rs.symbol",
+                limit=20,
             ),
             x=12,
-            y=0,
+            y=5,
             w=12,
             h=9,
             x_field="ticker",
-        ),
-        table_panel(
-            panel_id=3,
-            title="Ranking Table",
-            sql=(
-                latest_rank_cte()
-                + "SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.final_score, "
-                  "rs.bull_rank, rs.bear_rank, rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label "
-                  "FROM rank_snapshots rs JOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date "
-                  "LEFT JOIN tickers t ON t.symbol = rs.symbol "
-                  "WHERE rs.timeframe = '${timeframe}' ORDER BY rs.bull_rank ASC"
-            ),
-            x=0,
-            y=9,
-            w=24,
-            h=10,
-        ),
-        table_panel(
-            panel_id=4,
-            title="Market Breadth Snapshot",
-            sql=(
-                latest_breadth_cte()
-                + "SELECT snapshot_date, timeframe, universe_size, bullish_count, neutral_count, bearish_count, "
-                  "pct_above_ema20, pct_above_ema50, pct_above_ema200, pct_new_20d_high, pct_new_20d_low, "
-                  "pct_near_52w_high, pct_near_52w_low, avg_final_score, median_final_score "
-                  "FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' "
-                  "AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)"
-            ),
-            x=0,
-            y=19,
-            w=24,
-            h=6,
         ),
         table_panel(
             panel_id=5,
-            title="Latest Report Summary",
-            sql=(
-                latest_report_cte()
-                + "SELECT report_kind, title, summary_text, risk_text, storage_path "
-                  "FROM report_snapshots WHERE timeframe = '${timeframe}' AND symbol = '__MARKET__' "
-                  "AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot) ORDER BY report_kind"
+            title="Bullish Table",
+            sql=latest_rank_sql(
+                "rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bull_rank, rs.final_score, "
+                "rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label",
+                order_by="rs.bull_rank ASC, rs.symbol",
+                limit=25,
             ),
             x=0,
-            y=25,
+            y=14,
+            w=12,
+            h=12,
+            overrides=[ticker_link_override()],
+        ),
+        table_panel(
+            panel_id=6,
+            title="Bearish Table",
+            sql=latest_rank_sql(
+                "rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bear_rank, rs.final_score, "
+                "rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label",
+                order_by="rs.bear_rank ASC, rs.symbol",
+                limit=25,
+            ),
+            x=12,
+            y=14,
+            w=12,
+            h=12,
+            overrides=[ticker_link_override()],
+        ),
+        table_panel(
+            panel_id=7,
+            title="Latest Report Snapshot",
+            sql=(
+                latest_report_sql("rs.report_kind, rs.title, rs.summary_text, rs.risk_text, rs.storage_path")
+                + " AND rs.symbol = '__MARKET__'"
+            ),
+            x=0,
+            y=26,
             w=24,
             h=7,
         ),
@@ -743,130 +857,264 @@ def leaderboard_dashboard() -> dict:
     return dashboard
 
 
-def trend_regime_dashboard() -> dict:
-    dashboard = base_dashboard(
-        "S&P 500 Trend Regime",
-        "sp500-trend-regime",
-        ["sp500", "trend", "generated"],
-        dashboard_links(),
-    )
-    dashboard["templating"] = {"list": [custom_variable("timeframe", "Timeframe", ["daily", "weekly", "monthly"], "daily")]}
-    dashboard["panels"] = [
-        stat_panel(
-            panel_id=1,
-            title="Average Final Score",
-            sql=(
-                latest_breadth_cte()
-                + "SELECT avg_final_score AS value FROM market_breadth_snapshots "
-                  "WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)"
-            ),
-            x=0,
-            y=0,
-            w=8,
-            h=4,
-            decimals=1,
-        ),
-        stat_panel(
-            panel_id=2,
-            title="Bullish Count",
-            sql=(
-                latest_breadth_cte()
-                + "SELECT bullish_count AS value FROM market_breadth_snapshots "
-                  "WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)"
-            ),
-            x=8,
-            y=0,
-            w=8,
-            h=4,
-        ),
-        stat_panel(
-            panel_id=3,
-            title="Bearish Count",
-            sql=(
-                latest_breadth_cte()
-                + "SELECT bearish_count AS value FROM market_breadth_snapshots "
-                  "WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)"
-            ),
-            x=16,
-            y=0,
-            w=8,
-            h=4,
-        ),
-        table_panel(
-            panel_id=4,
-            title="Top Trend Regimes",
-            sql=(
-                latest_signal_cte()
-                + "SELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.trend_score, "
-                  "ss.trend_state, ss.regime_label, ss.recommendation_label "
-                  "FROM signal_snapshots ss JOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date "
-                  "LEFT JOIN tickers t ON t.symbol = ss.symbol "
-                  "WHERE ss.timeframe = '${timeframe}' ORDER BY ss.trend_score DESC, ss.symbol LIMIT 25"
-            ),
-            x=0,
-            y=4,
-            w=12,
-            h=10,
-        ),
-        table_panel(
-            panel_id=5,
-            title="Regime Distribution",
-            sql=(
-                latest_signal_cte()
-                + "SELECT regime_label, COUNT(*) AS names, AVG(final_score) AS avg_score "
-                  "FROM signal_snapshots WHERE timeframe = '${timeframe}' "
-                  "AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot) "
-                  "GROUP BY regime_label ORDER BY names DESC, regime_label"
-            ),
-            x=12,
-            y=4,
-            w=12,
-            h=10,
-        ),
-    ]
-    return dashboard
-
-
-def momentum_dashboard() -> dict:
-    dashboard = base_dashboard(
-        "S&P 500 Momentum",
-        "sp500-momentum",
-        ["sp500", "momentum", "generated"],
-        dashboard_links(),
-    )
-    dashboard["templating"] = {"list": [custom_variable("timeframe", "Timeframe", ["daily", "weekly", "monthly"], "daily")]}
-    dashboard["panels"] = [
+def analytics_family_dashboard(spec: AnalyticsDashboardSpec) -> dict:
+    dashboard = base_dashboard(spec.title, spec.uid, spec.tags)
+    dashboard["templating"]["list"] = analytics_variables()
+    dashboard["panels"] = market_overview_panels() + [
         bar_chart_panel(
-            panel_id=1,
-            title="Top Momentum Scores",
-            sql=(
-                latest_signal_cte()
-                + "SELECT ss.symbol AS ticker, ss.momentum_score AS score "
-                  "FROM signal_snapshots ss JOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date "
-                  "WHERE ss.timeframe = '${timeframe}' ORDER BY ss.momentum_score DESC, ss.symbol LIMIT 20"
-            ),
+            panel_id=5,
+            title=spec.bar_title,
+            sql=spec.bar_sql,
             x=0,
-            y=0,
+            y=4,
             w=24,
             h=9,
             x_field="ticker",
         ),
         table_panel(
-            panel_id=2,
-            title="Overbought and Oversold Names",
-            sql=(
-                latest_signal_cte()
-                + "SELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.momentum_score, "
-                  "ss.mean_reversion_score, ss.overbought_flag, ss.oversold_flag, ss.recommendation_label "
-                  "FROM signal_snapshots ss JOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date "
-                  "LEFT JOIN tickers t ON t.symbol = ss.symbol "
-                  "WHERE ss.timeframe = '${timeframe}' AND (ss.overbought_flag OR ss.oversold_flag) "
-                  "ORDER BY ss.momentum_score DESC, ss.symbol"
-            ),
+            panel_id=6,
+            title=spec.table_title,
+            sql=spec.table_sql,
             x=0,
-            y=9,
+            y=13,
             w=24,
-            h=10,
+            h=13,
+            overrides=[ticker_link_override()],
         ),
     ]
     return dashboard
+
+
+def trend_regime_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-trend-regime",
+            title="S&P 500 Trend Regime",
+            tags=["sp500", "trend", "generated"],
+            bar_title="Top Trend Scores",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.trend_score AS score",
+                order_by="ss.trend_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Trend Regime Table",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.trend_score, "
+                "ss.trend_state, ss.regime_label, ss.recommendation_label, ss.final_score",
+                order_by="ss.trend_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+def momentum_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-momentum",
+            title="S&P 500 Momentum",
+            tags=["sp500", "momentum", "generated"],
+            bar_title="Top Momentum Scores",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.momentum_score AS score",
+                order_by="ss.momentum_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Overbought and Oversold",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.momentum_score, "
+                "ss.momentum_state, ss.mean_reversion_score, ss.overbought_flag, ss.oversold_flag, "
+                "ss.recommendation_label",
+                extra_filters=["(ss.overbought_flag OR ss.oversold_flag)"],
+                order_by="ss.momentum_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+def volatility_risk_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-volatility-risk",
+            title="S&P 500 Volatility and Risk",
+            tags=["sp500", "risk", "generated"],
+            bar_title="Highest Volatility Risk",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.volatility_risk_score AS score",
+                order_by="ss.volatility_risk_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Risk Table",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.volatility_risk_score, "
+                "ss.risk_penalty, ss.volatility_state, ss.data_quality_flag, ss.final_score, "
+                "ss.recommendation_label",
+                order_by="ss.volatility_risk_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+def volume_confirmation_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-volume-confirmation",
+            title="S&P 500 Volume Confirmation",
+            tags=["sp500", "volume", "generated"],
+            bar_title="Top Volume Scores",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.volume_score AS score",
+                order_by="ss.volume_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Volume Confirmation Table",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.volume_score, "
+                "ss.volume_state, ss.breakout_flag, ss.trend_alignment_flag, ss.final_score, "
+                "ss.recommendation_label",
+                order_by="ss.volume_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+def breakout_breakdown_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-breakout-breakdown",
+            title="S&P 500 Breakout Breakdown",
+            tags=["sp500", "breakout", "generated"],
+            bar_title="Breakout Candidates",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.final_score AS score",
+                extra_filters=["ss.breakout_flag"],
+                order_by="ss.final_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Breakout and Breakdown Table",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.breakout_flag, "
+                "ss.breakdown_flag, ss.trend_alignment_flag, ss.trend_score, ss.volume_score, "
+                "ss.final_score, ss.recommendation_label",
+                extra_filters=["(ss.breakout_flag OR ss.breakdown_flag)"],
+                order_by="ss.final_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+def market_structure_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-market-structure",
+            title="S&P 500 Market Structure",
+            tags=["sp500", "structure", "generated"],
+            bar_title="Top Structure Scores",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.structure_score AS score",
+                order_by="ss.structure_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Structure Alignment Table",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.structure_score, "
+                "ss.structure_state, ss.trend_alignment_flag, ss.regime_label, ss.final_score, "
+                "ss.recommendation_label",
+                order_by="ss.structure_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+def relative_strength_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-relative-strength",
+            title="S&P 500 Relative Strength",
+            tags=["sp500", "relative-strength", "generated"],
+            bar_title="Top Relative Strength",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.relative_strength_score AS score",
+                order_by="ss.relative_strength_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Relative Strength Table",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.relative_strength_score, "
+                "ss.relative_strength_state, ss.trend_score, ss.momentum_score, ss.final_score, "
+                "ss.recommendation_label",
+                order_by="ss.relative_strength_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+def mean_reversion_dashboard() -> dict:
+    return analytics_family_dashboard(
+        AnalyticsDashboardSpec(
+            uid="sp500-mean-reversion",
+            title="S&P 500 Mean Reversion",
+            tags=["sp500", "mean-reversion", "generated"],
+            bar_title="Top Mean Reversion Scores",
+            bar_sql=latest_signal_sql(
+                "ss.symbol AS ticker, ss.mean_reversion_score AS score",
+                order_by="ss.mean_reversion_score DESC, ss.symbol",
+                limit=20,
+            ),
+            table_title="Mean Reversion Table",
+            table_sql=latest_signal_sql(
+                "ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.mean_reversion_score, "
+                "ss.momentum_score, ss.overbought_flag, ss.oversold_flag, ss.final_score, "
+                "ss.recommendation_label",
+                order_by="ss.mean_reversion_score DESC, ss.symbol",
+                limit=50,
+            ),
+        )
+    )
+
+
+DASHBOARD_FILES = (
+    DashboardFile("sp500-ticker-detail.json", ticker_detail_dashboard),
+    DashboardFile("sp500-leaderboards.json", leaderboard_dashboard),
+    DashboardFile("sp500-trend-regime.json", trend_regime_dashboard),
+    DashboardFile("sp500-momentum.json", momentum_dashboard),
+    DashboardFile("sp500-volatility-risk.json", volatility_risk_dashboard),
+    DashboardFile("sp500-volume-confirmation.json", volume_confirmation_dashboard),
+    DashboardFile("sp500-breakout-breakdown.json", breakout_breakdown_dashboard),
+    DashboardFile("sp500-market-structure.json", market_structure_dashboard),
+    DashboardFile("sp500-relative-strength.json", relative_strength_dashboard),
+    DashboardFile("sp500-mean-reversion.json", mean_reversion_dashboard),
+)
+
+EXPECTED_DASHBOARD_FILES = tuple(spec.filename for spec in DASHBOARD_FILES)
+
+
+def build_dashboards() -> dict[str, dict]:
+    return {spec.filename: spec.builder() for spec in DASHBOARD_FILES}
+
+
+def write_dashboards(output_dir: Path = DASHBOARD_DIR) -> list[Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written_paths: list[Path] = []
+    for filename, dashboard in build_dashboards().items():
+        path = output_dir / filename
+        with path.open("w", encoding="utf-8", newline="\r\n") as handle:
+            handle.write(json.dumps(dashboard, indent=2) + "\n")
+        written_paths.append(path)
+    return written_paths
+
+
+def main() -> None:
+    written_paths = write_dashboards()
+    for path in written_paths:
+        print(f"Wrote {path.relative_to(ROOT)}")
+
+
+if __name__ == "__main__":
+    main()

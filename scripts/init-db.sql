@@ -191,3 +191,26 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_report_snapshots_lookup
     ON report_snapshots (report_kind, timeframe, snapshot_date DESC, symbol);
+
+CREATE TABLE IF NOT EXISTS report_export_jobs (
+    job_id TEXT PRIMARY KEY,
+    report_kind TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    snapshot_date DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error_message TEXT NOT NULL DEFAULT '',
+    html_path TEXT NOT NULL DEFAULT '',
+    pdf_path TEXT NOT NULL DEFAULT '',
+    html_download_url TEXT NOT NULL DEFAULT '',
+    pdf_download_url TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_export_jobs_lookup
+    ON report_export_jobs (report_kind, timeframe, scope, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_report_export_jobs_status
+    ON report_export_jobs (status, created_at DESC);

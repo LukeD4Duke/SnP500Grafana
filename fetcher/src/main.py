@@ -2,10 +2,14 @@
 
 import logging
 import sys
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Iterable
 
 import pandas as pd
 from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from .analytics import refresh_analytics_snapshots
@@ -50,6 +54,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 INCREMENTAL_LOOKBACK_BUFFER_ROWS = 50
+STARTUP_CATCHUP_JOB_ID = "startup_post_sync_catchup"
+PIPELINE_LOCK = Lock()
 
 
 def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
@@ -231,9 +237,10 @@ def _log_fetch_summary(result: FetchResult, failed_symbol_log_limit: int) -> Non
 
 def run_scheduled_sync() -> None:
     """Run the scheduled OHLCV sync followed by indicator refresh."""
-    result = run_sync(full_historical=False)
-    refresh_indicators(result.successful_symbols, price_frame=result.dataframe)
-    refresh_analytics()
+    with PIPELINE_LOCK:
+        logger.info("Starting scheduled sync pipeline")
+        result = run_sync(full_historical=False)
+        run_post_sync_tasks(result.changed_symbols, price_frame=result.dataframe)
 
 
 def refresh_analytics() -> None:
@@ -291,6 +298,43 @@ def generate_configured_reports(report_kind: str | None = None) -> None:
         )
     if generated_count:
         logger.info("Generated %d report artifact sets", generated_count)
+
+
+def run_post_sync_tasks(
+    symbols: list[str],
+    price_frame: pd.DataFrame | None = None,
+    force_rebuild: bool = False,
+) -> None:
+    """Refresh indicators, then analytics, then reports in order."""
+    if not symbols:
+        logger.info("Skipping indicator refresh because no persisted OHLCV changes were detected")
+        logger.info("Skipping analytics and report refresh because no persisted OHLCV changes were detected")
+        return
+    refresh_indicators(
+        symbols,
+        price_frame=price_frame,
+        force_rebuild=force_rebuild,
+    )
+    refresh_analytics()
+    generate_configured_reports()
+
+
+def run_startup_post_sync_catchup(
+    symbols: list[str],
+    price_frame: pd.DataFrame | None = None,
+    force_rebuild: bool = False,
+) -> None:
+    """Run populated-DB startup catch-up work outside the blocking startup path."""
+    with PIPELINE_LOCK:
+        logger.info(
+            "Running startup post-sync catch-up for %d symbols",
+            len(set(symbols)),
+        )
+        run_post_sync_tasks(
+            symbols,
+            price_frame=price_frame,
+            force_rebuild=force_rebuild,
+        )
 
 
 def run_sync(
@@ -359,7 +403,7 @@ def run_sync(
 
     if df.empty:
         logger.warning("No data fetched")
-        return fetch_result
+        return replace(fetch_result, changed_symbols=[], upserted_row_count=0)
 
     rows = []
     for _, r in df.iterrows():
@@ -377,9 +421,25 @@ def run_sync(
             )
         )
 
-    count = upsert_stock_prices(db_config, rows)
-    logger.info("Upserted %d price records", count)
-    return fetch_result
+    upsert_result = upsert_stock_prices(db_config, rows)
+    logger.info(
+        "Fetched %d symbols; %d symbols had persisted OHLCV changes",
+        len(fetch_result.successful_symbols),
+        len(upsert_result.changed_symbols),
+    )
+    logger.info("Upserted %d price records", upsert_result.affected_row_count)
+    if not upsert_result.changed_symbols:
+        logger.info("No persisted OHLCV changes were detected during this sync")
+    else:
+        logger.info(
+            "Refreshing downstream work will use %d changed symbols",
+            len(upsert_result.changed_symbols),
+        )
+    return replace(
+        fetch_result,
+        changed_symbols=upsert_result.changed_symbols,
+        upserted_row_count=upsert_result.affected_row_count,
+    )
 
 
 def main() -> None:
@@ -388,6 +448,7 @@ def main() -> None:
     fetcher_config = get_fetcher_config()
     indicator_config = get_indicator_config()
     reporting_config = get_reporting_config()
+    scheduler = BlockingScheduler()
 
     if not wait_for_db(db_config):
         logger.error("Database not available after max retries. Exiting.")
@@ -402,16 +463,30 @@ def main() -> None:
     if normalized_split_rows:
         logger.info("Normalized %d persisted stock split rows from NaN to 0", normalized_split_rows)
 
+    startup_catchup_kwargs: dict[str, object] | None = None
     if has_stock_price_data(db_config):
         logger.info("Existing stock price data found, running startup incremental sync")
         startup_result = run_sync(full_historical=False)
-        refresh_indicators(
-            startup_result.successful_symbols,
-            price_frame=startup_result.dataframe,
-            force_rebuild=indicator_config.rebuild_on_startup,
-        )
-        refresh_analytics()
-        generate_configured_reports()
+        if fetcher_config.startup_post_sync_mode == "blocking":
+            logger.info("Running populated-DB startup post-sync tasks inline (STARTUP_POST_SYNC_MODE=blocking)")
+            run_post_sync_tasks(
+                startup_result.changed_symbols,
+                price_frame=startup_result.dataframe,
+                force_rebuild=indicator_config.rebuild_on_startup,
+            )
+        else:
+            if startup_result.changed_symbols:
+                logger.info(
+                    "Deferring populated-DB startup post-sync tasks to background catch-up "
+                    "(STARTUP_POST_SYNC_MODE=background)"
+                )
+                startup_catchup_kwargs = {
+                    "symbols": startup_result.changed_symbols,
+                    "price_frame": startup_result.dataframe,
+                    "force_rebuild": indicator_config.rebuild_on_startup,
+                }
+            else:
+                logger.info("Skipping startup post-sync catch-up scheduling because no persisted OHLCV changes were detected")
         min_price_date, max_price_date = get_price_date_bounds(db_config)
         logger.info(
             "Current price data range after incremental sync: %s to %s",
@@ -432,13 +507,12 @@ def main() -> None:
                 end_override=min_price_date,
                 mode_label="Running startup backfill",
             )
-            refresh_indicators(
-                backfill_result.successful_symbols,
+            run_post_sync_tasks(
+                backfill_result.changed_symbols,
                 price_frame=backfill_result.dataframe,
                 force_rebuild=True,
             )
-            refresh_analytics()
-            generate_configured_reports()
+            startup_catchup_kwargs = None
             min_price_date, max_price_date = get_price_date_bounds(db_config)
             logger.info(
                 "Price data range after backfill: %s to %s",
@@ -454,19 +528,17 @@ def main() -> None:
     else:
         logger.info("No stock price data found, running initial historical load (this may take 15-30 minutes)")
         full_result = run_sync(full_historical=True)
-        refresh_indicators(
-            full_result.successful_symbols,
+        run_post_sync_tasks(
+            full_result.changed_symbols,
             price_frame=full_result.dataframe,
             force_rebuild=True,
         )
-        refresh_analytics()
-        generate_configured_reports()
 
-    scheduler = BlockingScheduler()
     scheduler.add_job(
         run_scheduled_sync,
         CronTrigger.from_crontab(fetcher_config.update_cron),
         id="daily_update",
+        max_instances=1,
         replace_existing=True,
     )
     logger.info("Scheduled daily update with cron: %s", fetcher_config.update_cron)
@@ -485,6 +557,21 @@ def main() -> None:
             replace_existing=True,
         )
         logger.info("Scheduled monthly report with cron: %s", reporting_config.monthly_cron)
+
+    if startup_catchup_kwargs is not None:
+        run_date = datetime.now(timezone.utc) + timedelta(seconds=1)
+        scheduler.add_job(
+            run_startup_post_sync_catchup,
+            DateTrigger(run_date=run_date),
+            kwargs=startup_catchup_kwargs,
+            id=STARTUP_CATCHUP_JOB_ID,
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info(
+            "Scheduled startup post-sync catch-up for %s",
+            run_date.isoformat(),
+        )
     scheduler.start()
 
 

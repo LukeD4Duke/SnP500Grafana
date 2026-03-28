@@ -13,19 +13,9 @@
       "includeVars": true,
       "keepTime": false,
       "targetBlank": false,
-      "title": "Volatility Risk",
+      "title": "Ticker Detail",
       "type": "link",
-      "url": "/d/sp500-volatility-risk/sp500-volatility-risk"
-    },
-    {
-      "asDropdown": false,
-      "icon": "dashboard",
-      "includeVars": true,
-      "keepTime": false,
-      "targetBlank": false,
-      "title": "Market Structure",
-      "type": "link",
-      "url": "/d/sp500-market-structure/sp500-market-structure"
+      "url": "/d/sp500-ticker-detail"
     },
     {
       "asDropdown": false,
@@ -35,7 +25,77 @@
       "targetBlank": false,
       "title": "Leaderboards",
       "type": "link",
-      "url": "/d/sp500-leaderboards/sp500-leaderboards"
+      "url": "/d/sp500-leaderboards"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Trend Regime",
+      "type": "link",
+      "url": "/d/sp500-trend-regime"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Momentum",
+      "type": "link",
+      "url": "/d/sp500-momentum"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Volatility and Risk",
+      "type": "link",
+      "url": "/d/sp500-volatility-risk"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Volume Confirmation",
+      "type": "link",
+      "url": "/d/sp500-volume-confirmation"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Market Structure",
+      "type": "link",
+      "url": "/d/sp500-market-structure"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Relative Strength",
+      "type": "link",
+      "url": "/d/sp500-relative-strength"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Mean Reversion",
+      "type": "link",
+      "url": "/d/sp500-mean-reversion"
     }
   ],
   "liveNow": false,
@@ -60,7 +120,8 @@
               }
             ]
           },
-          "unit": "none"
+          "unit": "none",
+          "decimals": 1
         },
         "overrides": []
       },
@@ -76,6 +137,7 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -96,7 +158,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT avg_final_score AS value FROM latest_breadth",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT avg_final_score AS value\nFROM market_breadth_snapshots mbs\nJOIN latest_snapshot ls ON ls.snapshot_date = mbs.snapshot_date\nWHERE mbs.timeframe = '${timeframe}'",
           "refId": "A"
         }
       ],
@@ -139,6 +201,7 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -159,7 +222,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT bullish_count AS value FROM latest_breadth",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT bullish_count AS value\nFROM market_breadth_snapshots mbs\nJOIN latest_snapshot ls ON ls.snapshot_date = mbs.snapshot_date\nWHERE mbs.timeframe = '${timeframe}'",
           "refId": "A"
         }
       ],
@@ -202,6 +265,7 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -222,7 +286,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT bearish_count AS value FROM latest_breadth",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT bearish_count AS value\nFROM market_breadth_snapshots mbs\nJOIN latest_snapshot ls ON ls.snapshot_date = mbs.snapshot_date\nWHERE mbs.timeframe = '${timeframe}'",
           "refId": "A"
         }
       ],
@@ -249,7 +313,8 @@
               }
             ]
           },
-          "unit": "percent"
+          "unit": "percentunit",
+          "decimals": 2
         },
         "overrides": []
       },
@@ -265,6 +330,7 @@
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
+        "percentChangeColorMode": "standard",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -285,7 +351,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'), latest_breadth AS (SELECT * FROM market_breadth_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT pct_above_ema50 AS value FROM latest_breadth",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT pct_above_ema50 AS value\nFROM market_breadth_snapshots mbs\nJOIN latest_snapshot ls ON ls.snapshot_date = mbs.snapshot_date\nWHERE mbs.timeframe = '${timeframe}'",
           "refId": "A"
         }
       ],
@@ -331,29 +397,10 @@
             ]
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ticker"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": false,
-                    "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
-        "h": 10,
+        "h": 9,
         "w": 24,
         "x": 0,
         "y": 4
@@ -362,11 +409,13 @@
       "options": {
         "barRadius": 0,
         "barWidth": 0.9,
+        "colorByField": null,
+        "fullHighlight": false,
         "groupWidth": 0.8,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": false
         },
         "orientation": "vertical",
         "showValue": "auto",
@@ -377,7 +426,7 @@
         },
         "xField": "ticker",
         "xTickLabelMaxLength": 12,
-        "xTickLabelRotation": 45,
+        "xTickLabelRotation": 30,
         "xTickLabelSpacing": 0
       },
       "targets": [
@@ -389,7 +438,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, COALESCE(t.sector,'') AS sector, ss.close, ss.final_score, ss.trend_score, ss.momentum_score, ss.volume_score, ss.relative_strength_score, ss.structure_score, ss.mean_reversion_score, ss.volatility_risk_score, ss.regime_label, ss.recommendation_label, ss.breakout_flag, ss.breakdown_flag, ss.overbought_flag, ss.oversold_flag, ss.trend_alignment_flag, ss.data_quality_flag FROM latest_signals ss LEFT JOIN tickers t ON t.symbol = ss.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') AND (ss.breakout_flag OR ss.breakdown_flag) ORDER BY ss.final_score DESC, ss.symbol LIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT ss.symbol AS ticker, ss.final_score AS score\nFROM signal_snapshots ss\nJOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date\nLEFT JOIN tickers t ON t.symbol = ss.symbol\nWHERE ss.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring}) AND ss.breakout_flag\nORDER BY ss.final_score DESC, ss.symbol\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -434,7 +483,7 @@
                   {
                     "targetBlank": false,
                     "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
+                    "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
                   }
                 ]
               }
@@ -443,10 +492,10 @@
         ]
       },
       "gridPos": {
-        "h": 10,
+        "h": 13,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 13
       },
       "id": 6,
       "options": {
@@ -465,7 +514,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'), latest_signals AS (SELECT * FROM signal_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, COALESCE(t.sector,'') AS sector, ss.close, ss.final_score, ss.trend_score, ss.momentum_score, ss.volume_score, ss.relative_strength_score, ss.structure_score, ss.mean_reversion_score, ss.volatility_risk_score, ss.regime_label, ss.recommendation_label, ss.breakout_flag, ss.breakdown_flag, ss.overbought_flag, ss.oversold_flag, ss.trend_alignment_flag, ss.data_quality_flag FROM latest_signals ss LEFT JOIN tickers t ON t.symbol = ss.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') AND (ss.breakout_flag OR ss.breakdown_flag) ORDER BY ss.final_score DESC, ss.symbol LIMIT 30",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.breakout_flag, ss.breakdown_flag, ss.trend_alignment_flag, ss.trend_score, ss.volume_score, ss.final_score, ss.recommendation_label\nFROM signal_snapshots ss\nJOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date\nLEFT JOIN tickers t ON t.symbol = ss.symbol\nWHERE ss.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring}) AND (ss.breakout_flag OR ss.breakdown_flag)\nORDER BY ss.final_score DESC, ss.symbol\nLIMIT 50",
           "refId": "A"
         }
       ],
@@ -479,38 +528,51 @@
   "tags": [
     "sp500",
     "breakout",
-    "analytics",
     "generated"
   ],
-  "time": {
-    "from": "now-1y",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "browser",
-  "title": "S&P 500 Breakout Breakdown",
-  "uid": "sp500-breakout-breakdown",
-  "version": 1,
-  "weekStart": "",
   "templating": {
     "list": [
       {
         "current": {
           "selected": true,
-          "text": "Daily",
+          "text": "daily",
           "value": "daily"
         },
+        "definition": "daily,weekly,monthly",
         "hide": 0,
         "includeAll": false,
         "label": "Timeframe",
         "multi": false,
         "name": "timeframe",
-        "options": [],
-        "query": "Daily : daily, Weekly : weekly, Monthly : monthly",
+        "options": [
+          {
+            "selected": true,
+            "text": "daily",
+            "value": "daily"
+          },
+          {
+            "selected": false,
+            "text": "weekly",
+            "value": "weekly"
+          },
+          {
+            "selected": false,
+            "text": "monthly",
+            "value": "monthly"
+          }
+        ],
+        "query": "daily,weekly,monthly",
+        "refresh": 0,
         "skipUrlSync": false,
+        "sort": 0,
         "type": "custom"
       },
       {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "__all"
+        },
         "datasource": {
           "type": "postgres",
           "uid": "timescaledb"
@@ -528,13 +590,18 @@
         "skipUrlSync": false,
         "sort": 1,
         "type": "query",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "__all"
-        },
         "allValue": "__all"
       }
     ]
-  }
+  },
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "S&P 500 Breakout Breakdown",
+  "uid": "sp500-breakout-breakdown",
+  "version": 1,
+  "weekStart": ""
 }

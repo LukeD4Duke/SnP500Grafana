@@ -15,7 +15,7 @@
       "targetBlank": false,
       "title": "Ticker Detail",
       "type": "link",
-      "url": "/d/sp500-ticker-detail/sp500-ticker-detail"
+      "url": "/d/sp500-ticker-detail"
     },
     {
       "asDropdown": false,
@@ -25,7 +25,7 @@
       "targetBlank": false,
       "title": "Trend Regime",
       "type": "link",
-      "url": "/d/sp500-trend-regime/sp500-trend-regime"
+      "url": "/d/sp500-trend-regime"
     },
     {
       "asDropdown": false,
@@ -33,9 +33,59 @@
       "includeVars": true,
       "keepTime": false,
       "targetBlank": false,
-      "title": "Breakout Breakdown",
+      "title": "Momentum",
       "type": "link",
-      "url": "/d/sp500-breakout-breakdown/sp500-breakout-breakdown"
+      "url": "/d/sp500-momentum"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Volatility and Risk",
+      "type": "link",
+      "url": "/d/sp500-volatility-risk"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Volume Confirmation",
+      "type": "link",
+      "url": "/d/sp500-volume-confirmation"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Breakout and Breakdown",
+      "type": "link",
+      "url": "/d/sp500-breakout-breakdown"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Market Structure",
+      "type": "link",
+      "url": "/d/sp500-market-structure"
+    },
+    {
+      "asDropdown": false,
+      "icon": "dashboard",
+      "includeVars": true,
+      "keepTime": false,
+      "targetBlank": false,
+      "title": "Relative Strength",
+      "type": "link",
+      "url": "/d/sp500-relative-strength"
     },
     {
       "asDropdown": false,
@@ -45,11 +95,121 @@
       "targetBlank": false,
       "title": "Mean Reversion",
       "type": "link",
-      "url": "/d/sp500-mean-reversion/sp500-mean-reversion"
+      "url": "/d/sp500-mean-reversion"
     }
   ],
   "liveNow": false,
   "panels": [
+    {
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "content": "<div style=\"display:flex;flex-direction:column;gap:12px;height:100%;justify-content:center;padding:8px 4px;\"><div style=\"font-size:18px;font-weight:700;letter-spacing:0.01em;\">Generate Monthly Report</div><div style=\"color:#a5adba;line-height:1.4;\">Open the report UI, generate the latest monthly export, and download HTML or PDF artifacts.</div><a href=\"http://localhost:3002/monthly-report?autostart=1\" style=\"display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 16px;border-radius:10px;background:linear-gradient(135deg,#1f78c1,#165a96);color:#ffffff;font-weight:700;text-decoration:none;width:max-content;\">Generate Monthly Report</a></div>",
+        "mode": "html"
+      },
+      "transparent": true,
+      "title": "Monthly Report",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "html_download_url"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Download HTML",
+                    "url": "${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pdf_download_url"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": true,
+                    "title": "Download PDF",
+                    "url": "${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 16,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH latest_job AS (    SELECT job_id, report_kind, timeframe, scope, status, snapshot_date, created_at, started_at,            completed_at, error_message, html_download_url, pdf_download_url     FROM report_export_jobs     WHERE report_kind = 'monthly'       AND timeframe = 'monthly'       AND scope = 'full_market'     ORDER BY created_at DESC, job_id DESC     LIMIT 1) SELECT job_id, report_kind, timeframe, scope, status, snapshot_date, created_at, started_at,        completed_at, error_message, html_download_url, pdf_download_url FROM latest_job",
+          "refId": "A"
+        }
+      ],
+      "title": "Latest Manual Export",
+      "type": "table"
+    },
     {
       "datasource": {
         "type": "postgres",
@@ -89,42 +249,25 @@
             ]
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ticker"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": false,
-                    "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
-        "h": 10,
+        "h": 9,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 5
       },
-      "id": 1,
+      "id": 3,
       "options": {
         "barRadius": 0,
         "barWidth": 0.9,
+        "colorByField": null,
+        "fullHighlight": false,
         "groupWidth": 0.8,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": false
         },
         "orientation": "vertical",
         "showValue": "auto",
@@ -135,7 +278,7 @@
         },
         "xField": "ticker",
         "xTickLabelMaxLength": 12,
-        "xTickLabelRotation": 45,
+        "xTickLabelRotation": 30,
         "xTickLabelSpacing": 0
       },
       "targets": [
@@ -147,7 +290,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bull_rank ASC, rs.symbol LIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, rs.final_score AS score\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bull_rank ASC, rs.symbol\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -193,42 +336,25 @@
             ]
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "ticker"
-            },
-            "properties": [
-              {
-                "id": "links",
-                "value": [
-                  {
-                    "targetBlank": false,
-                    "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
-        "h": 10,
+        "h": 9,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 5
       },
-      "id": 2,
+      "id": 4,
       "options": {
         "barRadius": 0,
         "barWidth": 0.9,
+        "colorByField": null,
+        "fullHighlight": false,
         "groupWidth": 0.8,
         "legend": {
           "displayMode": "list",
           "placement": "bottom",
-          "showLegend": true
+          "showLegend": false
         },
         "orientation": "vertical",
         "showValue": "auto",
@@ -239,7 +365,7 @@
         },
         "xField": "ticker",
         "xTickLabelMaxLength": 12,
-        "xTickLabelRotation": 45,
+        "xTickLabelRotation": 30,
         "xTickLabelSpacing": 0
       },
       "targets": [
@@ -251,7 +377,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bear_rank ASC, rs.symbol LIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, rs.final_score AS score\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bear_rank ASC, rs.symbol\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -296,7 +422,7 @@
                   {
                     "targetBlank": false,
                     "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
+                    "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
                   }
                 ]
               }
@@ -305,12 +431,12 @@
         ]
       },
       "gridPos": {
-        "h": 9,
+        "h": 12,
         "w": 12,
         "x": 0,
-        "y": 10
+        "y": 14
       },
-      "id": 3,
+      "id": 5,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -327,7 +453,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bull_rank ASC, rs.symbol LIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bull_rank, rs.final_score, rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bull_rank ASC, rs.symbol\nLIMIT 25",
           "refId": "A"
         }
       ],
@@ -372,7 +498,7 @@
                   {
                     "targetBlank": false,
                     "title": "Open ticker detail",
-                    "url": "/d/sp500-ticker-detail/sp500-ticker-detail?var-ticker=${__data.fields.ticker}&var-timeframe=${timeframe}"
+                    "url": "/d/sp500-ticker-detail?var-ticker=${__data.fields.ticker}"
                   }
                 ]
               }
@@ -381,12 +507,12 @@
         ]
       },
       "gridPos": {
-        "h": 9,
+        "h": 12,
         "w": 12,
         "x": 12,
-        "y": 10
+        "y": 14
       },
-      "id": 4,
+      "id": 6,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -403,7 +529,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'), latest_ranks AS (SELECT * FROM rank_snapshots WHERE timeframe = '${timeframe}' AND snapshot_date = (SELECT snapshot_date FROM latest_snapshot)) SELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, COALESCE(t.sector,'') AS sector, rs.final_score, rs.bull_rank, rs.bear_rank, rs.regime_label, rs.recommendation_label, rs.score_change_1w, rs.score_change_1m FROM latest_ranks rs LEFT JOIN tickers t ON t.symbol = rs.symbol WHERE ('${sector}' = '__all' OR COALESCE(t.sector,'') = '${sector}') ORDER BY rs.bear_rank ASC, rs.symbol LIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bear_rank, rs.final_score, rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bear_rank ASC, rs.symbol\nLIMIT 25",
           "refId": "A"
         }
       ],
@@ -441,9 +567,9 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 26
       },
-      "id": 5,
+      "id": 7,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -460,7 +586,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_report AS (SELECT MAX(snapshot_date) AS snapshot_date FROM report_snapshots WHERE timeframe = '${timeframe}' AND report_kind = '${report_kind}'), latest_reports AS (SELECT * FROM report_snapshots WHERE timeframe = '${timeframe}' AND report_kind = '${report_kind}' AND snapshot_date = (SELECT snapshot_date FROM latest_report)) SELECT symbol, title, summary_text, risk_text, storage_path FROM latest_reports ORDER BY symbol",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM report_snapshots WHERE timeframe = '${timeframe}' AND report_kind = '${report_kind}'\n)\nSELECT rs.report_kind, rs.title, rs.summary_text, rs.risk_text, rs.storage_path\nFROM report_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nWHERE rs.timeframe = '${timeframe}' AND rs.report_kind = '${report_kind}' AND rs.symbol = '__MARKET__'",
           "refId": "A"
         }
       ],
@@ -474,38 +600,51 @@
   "tags": [
     "sp500",
     "leaderboards",
-    "analytics",
     "generated"
   ],
-  "time": {
-    "from": "now-1y",
-    "to": "now"
-  },
-  "timepicker": {},
-  "timezone": "browser",
-  "title": "S&P 500 Leaderboards",
-  "uid": "sp500-leaderboards",
-  "version": 1,
-  "weekStart": "",
   "templating": {
     "list": [
       {
         "current": {
           "selected": true,
-          "text": "Daily",
+          "text": "daily",
           "value": "daily"
         },
+        "definition": "daily,weekly,monthly",
         "hide": 0,
         "includeAll": false,
         "label": "Timeframe",
         "multi": false,
         "name": "timeframe",
-        "options": [],
-        "query": "Daily : daily, Weekly : weekly, Monthly : monthly",
+        "options": [
+          {
+            "selected": true,
+            "text": "daily",
+            "value": "daily"
+          },
+          {
+            "selected": false,
+            "text": "weekly",
+            "value": "weekly"
+          },
+          {
+            "selected": false,
+            "text": "monthly",
+            "value": "monthly"
+          }
+        ],
+        "query": "daily,weekly,monthly",
+        "refresh": 0,
         "skipUrlSync": false,
+        "sort": 0,
         "type": "custom"
       },
       {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "__all"
+        },
         "datasource": {
           "type": "postgres",
           "uid": "timescaledb"
@@ -523,29 +662,48 @@
         "skipUrlSync": false,
         "sort": 1,
         "type": "query",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "__all"
-        },
         "allValue": "__all"
       },
       {
         "current": {
           "selected": true,
-          "text": "Weekly",
+          "text": "weekly",
           "value": "weekly"
         },
+        "definition": "weekly,monthly",
         "hide": 0,
         "includeAll": false,
-        "label": "Report Kind",
+        "label": "Report",
         "multi": false,
         "name": "report_kind",
-        "options": [],
-        "query": "Weekly : weekly, Monthly : monthly",
+        "options": [
+          {
+            "selected": true,
+            "text": "weekly",
+            "value": "weekly"
+          },
+          {
+            "selected": false,
+            "text": "monthly",
+            "value": "monthly"
+          }
+        ],
+        "query": "weekly,monthly",
+        "refresh": 0,
         "skipUrlSync": false,
+        "sort": 0,
         "type": "custom"
       }
     ]
-  }
+  },
+  "time": {
+    "from": "now-1y",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "S&P 500 Leaderboards",
+  "uid": "sp500-leaderboards",
+  "version": 1,
+  "weekStart": ""
 }

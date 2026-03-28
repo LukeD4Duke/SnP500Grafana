@@ -40,5 +40,37 @@ class InitSchemaTests(unittest.TestCase):
         self.assertIn("CREATE EXTENSION IF NOT EXISTS timescaledb", executed[0])
 
 
+class UpsertStockPricesTests(unittest.TestCase):
+    def test_upsert_stock_prices_returns_changed_symbols_and_count(self):
+        config = DatabaseConfig(
+            host="localhost",
+            port=5432,
+            name="stocks",
+            user="postgres",
+            password="secret",
+        )
+        rows = [
+            ("AAA", "2024-01-02T00:00:00+00:00", 1.0, 1.5, 0.5, 1.2, 100, 0.0, 0.0),
+            ("BBB", "2024-01-02T00:00:00+00:00", 2.0, 2.5, 1.5, 2.2, 200, 0.0, 0.0),
+        ]
+        cursor = mock.MagicMock()
+        cursor.fetchall.return_value = [("BBB",), ("AAA",), ("AAA",)]
+        cursor.rowcount = 3
+
+        @contextmanager
+        def stub_connection(_config):
+            connection = mock.MagicMock()
+            connection.cursor.return_value.__enter__.return_value = cursor
+            yield connection
+
+        with mock.patch("fetcher.src.database.get_connection", stub_connection), \
+             mock.patch("fetcher.src.database.execute_values") as execute_values:
+            result = database.upsert_stock_prices(config, rows)
+
+        execute_values.assert_called_once()
+        self.assertEqual(result.affected_row_count, 3)
+        self.assertEqual(result.changed_symbols, ["AAA", "BBB"])
+
+
 if __name__ == "__main__":
     unittest.main()

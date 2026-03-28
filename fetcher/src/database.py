@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -13,6 +14,16 @@ from psycopg2.extras import execute_values
 from .config import DatabaseConfig
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StockPriceUpsertResult:
+    """Summary of persisted OHLCV changes from an upsert run."""
+
+    affected_row_count: int
+    changed_symbols: list[str]
+
+
 DEFAULT_INIT_SQL = """
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
@@ -210,6 +221,29 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_report_snapshots_lookup
     ON report_snapshots (report_kind, timeframe, snapshot_date DESC, symbol);
+
+CREATE TABLE IF NOT EXISTS report_export_jobs (
+    job_id TEXT PRIMARY KEY,
+    report_kind TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    snapshot_date DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    error_message TEXT NOT NULL DEFAULT '',
+    html_path TEXT NOT NULL DEFAULT '',
+    pdf_path TEXT NOT NULL DEFAULT '',
+    html_download_url TEXT NOT NULL DEFAULT '',
+    pdf_download_url TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_export_jobs_lookup
+    ON report_export_jobs (report_kind, timeframe, scope, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_report_export_jobs_status
+    ON report_export_jobs (status, created_at DESC);
 """
 
 
@@ -349,10 +383,10 @@ def upsert_tickers(config: DatabaseConfig, tickers: List[Tuple[str, str, str, st
 def upsert_stock_prices(
     config: DatabaseConfig,
     rows: List[Tuple[str, str, float, float, float, float, int, float, float]],
-) -> int:
+) -> StockPriceUpsertResult:
     """Upsert stock price rows. Each row: (symbol, timestamp, open, high, low, close, volume, dividends, stock_splits)."""
     if not rows:
-        return 0
+        return StockPriceUpsertResult(affected_row_count=0, changed_symbols=[])
 
     upsert_sql = """
         INSERT INTO stock_prices (symbol, timestamp, open, high, low, close, volume, dividends, stock_splits)
@@ -365,11 +399,33 @@ def upsert_stock_prices(
             volume = EXCLUDED.volume,
             dividends = EXCLUDED.dividends,
             stock_splits = EXCLUDED.stock_splits
+        WHERE (
+            stock_prices.open,
+            stock_prices.high,
+            stock_prices.low,
+            stock_prices.close,
+            stock_prices.volume,
+            stock_prices.dividends,
+            stock_prices.stock_splits
+        ) IS DISTINCT FROM (
+            EXCLUDED.open,
+            EXCLUDED.high,
+            EXCLUDED.low,
+            EXCLUDED.close,
+            EXCLUDED.volume,
+            EXCLUDED.dividends,
+            EXCLUDED.stock_splits
+        )
+        RETURNING symbol
     """
     with get_connection(config) as conn:
         with conn.cursor() as cur:
             execute_values(cur, upsert_sql, rows, page_size=500)
-            return cur.rowcount
+            changed_symbols = sorted({str(row[0]) for row in cur.fetchall()})
+            return StockPriceUpsertResult(
+                affected_row_count=cur.rowcount,
+                changed_symbols=changed_symbols,
+            )
 
 
 def upsert_indicator_catalog(
@@ -723,310 +779,6 @@ def upsert_stock_indicators(
             return cur.rowcount
 
 
-def upsert_signal_snapshots(config: DatabaseConfig, rows: List[tuple[object, ...]]) -> int:
-    """Upsert signal snapshot rows."""
-    if not rows:
-        return 0
-
-    normalized_rows = [
-        (
-            snapshot_date,
-            symbol,
-            timeframe,
-            last_timestamp,
-            close,
-            volume,
-            trend_score,
-            momentum_score,
-            volume_score,
-            relative_strength_score,
-            structure_score,
-            mean_reversion_score,
-            volatility_risk_score,
-            risk_penalty,
-            final_score,
-            trend_state,
-            momentum_state,
-            volume_state,
-            relative_strength_state,
-            structure_state,
-            volatility_state,
-            regime_label,
-            recommendation_label,
-            breakout_flag,
-            breakdown_flag,
-            overbought_flag,
-            oversold_flag,
-            trend_alignment_flag,
-            data_quality_flag,
-            _json_value(drivers_json),
-        )
-        for (
-            snapshot_date,
-            symbol,
-            timeframe,
-            last_timestamp,
-            close,
-            volume,
-            trend_score,
-            momentum_score,
-            volume_score,
-            relative_strength_score,
-            structure_score,
-            mean_reversion_score,
-            volatility_risk_score,
-            risk_penalty,
-            final_score,
-            trend_state,
-            momentum_state,
-            volume_state,
-            relative_strength_state,
-            structure_state,
-            volatility_state,
-            regime_label,
-            recommendation_label,
-            breakout_flag,
-            breakdown_flag,
-            overbought_flag,
-            oversold_flag,
-            trend_alignment_flag,
-            data_quality_flag,
-            drivers_json,
-        ) in rows
-    ]
-
-    upsert_sql = """
-        INSERT INTO signal_snapshots (
-            snapshot_date,
-            symbol,
-            timeframe,
-            last_timestamp,
-            close,
-            volume,
-            trend_score,
-            momentum_score,
-            volume_score,
-            relative_strength_score,
-            structure_score,
-            mean_reversion_score,
-            volatility_risk_score,
-            risk_penalty,
-            final_score,
-            trend_state,
-            momentum_state,
-            volume_state,
-            relative_strength_state,
-            structure_state,
-            volatility_state,
-            regime_label,
-            recommendation_label,
-            breakout_flag,
-            breakdown_flag,
-            overbought_flag,
-            oversold_flag,
-            trend_alignment_flag,
-            data_quality_flag,
-            drivers_json
-        )
-        VALUES %s
-        ON CONFLICT (snapshot_date, symbol, timeframe) DO UPDATE SET
-            last_timestamp = EXCLUDED.last_timestamp,
-            close = EXCLUDED.close,
-            volume = EXCLUDED.volume,
-            trend_score = EXCLUDED.trend_score,
-            momentum_score = EXCLUDED.momentum_score,
-            volume_score = EXCLUDED.volume_score,
-            relative_strength_score = EXCLUDED.relative_strength_score,
-            structure_score = EXCLUDED.structure_score,
-            mean_reversion_score = EXCLUDED.mean_reversion_score,
-            volatility_risk_score = EXCLUDED.volatility_risk_score,
-            risk_penalty = EXCLUDED.risk_penalty,
-            final_score = EXCLUDED.final_score,
-            trend_state = EXCLUDED.trend_state,
-            momentum_state = EXCLUDED.momentum_state,
-            volume_state = EXCLUDED.volume_state,
-            relative_strength_state = EXCLUDED.relative_strength_state,
-            structure_state = EXCLUDED.structure_state,
-            volatility_state = EXCLUDED.volatility_state,
-            regime_label = EXCLUDED.regime_label,
-            recommendation_label = EXCLUDED.recommendation_label,
-            breakout_flag = EXCLUDED.breakout_flag,
-            breakdown_flag = EXCLUDED.breakdown_flag,
-            overbought_flag = EXCLUDED.overbought_flag,
-            oversold_flag = EXCLUDED.oversold_flag,
-            trend_alignment_flag = EXCLUDED.trend_alignment_flag,
-            data_quality_flag = EXCLUDED.data_quality_flag,
-            drivers_json = EXCLUDED.drivers_json,
-            updated_at = NOW()
-    """
-    with get_connection(config) as conn:
-        with conn.cursor() as cur:
-            execute_values(cur, upsert_sql, normalized_rows, page_size=500)
-            return cur.rowcount
-
-
-def upsert_rank_snapshots(config: DatabaseConfig, rows: List[tuple[object, ...]]) -> int:
-    """Upsert rank snapshot rows."""
-    if not rows:
-        return 0
-
-    upsert_sql = """
-        INSERT INTO rank_snapshots (
-            snapshot_date,
-            timeframe,
-            symbol,
-            final_score,
-            bull_rank,
-            bear_rank,
-            regime_label,
-            recommendation_label,
-            score_change_1w,
-            score_change_1m,
-            in_top20_bull,
-            in_top20_bear
-        )
-        VALUES %s
-        ON CONFLICT (snapshot_date, timeframe, symbol) DO UPDATE SET
-            final_score = EXCLUDED.final_score,
-            bull_rank = EXCLUDED.bull_rank,
-            bear_rank = EXCLUDED.bear_rank,
-            regime_label = EXCLUDED.regime_label,
-            recommendation_label = EXCLUDED.recommendation_label,
-            score_change_1w = EXCLUDED.score_change_1w,
-            score_change_1m = EXCLUDED.score_change_1m,
-            in_top20_bull = EXCLUDED.in_top20_bull,
-            in_top20_bear = EXCLUDED.in_top20_bear,
-            updated_at = NOW()
-    """
-    with get_connection(config) as conn:
-        with conn.cursor() as cur:
-            execute_values(cur, upsert_sql, rows, page_size=500)
-            return cur.rowcount
-
-
-def upsert_market_breadth_snapshots(config: DatabaseConfig, rows: List[tuple[object, ...]]) -> int:
-    """Upsert market breadth snapshot rows."""
-    if not rows:
-        return 0
-
-    upsert_sql = """
-        INSERT INTO market_breadth_snapshots (
-            snapshot_date,
-            timeframe,
-            universe_size,
-            bullish_count,
-            neutral_count,
-            bearish_count,
-            pct_above_ema20,
-            pct_above_ema50,
-            pct_above_ema200,
-            pct_new_20d_high,
-            pct_new_20d_low,
-            pct_near_52w_high,
-            pct_near_52w_low,
-            avg_final_score,
-            median_final_score
-        )
-        VALUES %s
-        ON CONFLICT (snapshot_date, timeframe) DO UPDATE SET
-            universe_size = EXCLUDED.universe_size,
-            bullish_count = EXCLUDED.bullish_count,
-            neutral_count = EXCLUDED.neutral_count,
-            bearish_count = EXCLUDED.bearish_count,
-            pct_above_ema20 = EXCLUDED.pct_above_ema20,
-            pct_above_ema50 = EXCLUDED.pct_above_ema50,
-            pct_above_ema200 = EXCLUDED.pct_above_ema200,
-            pct_new_20d_high = EXCLUDED.pct_new_20d_high,
-            pct_new_20d_low = EXCLUDED.pct_new_20d_low,
-            pct_near_52w_high = EXCLUDED.pct_near_52w_high,
-            pct_near_52w_low = EXCLUDED.pct_near_52w_low,
-            avg_final_score = EXCLUDED.avg_final_score,
-            median_final_score = EXCLUDED.median_final_score,
-            updated_at = NOW()
-    """
-    with get_connection(config) as conn:
-        with conn.cursor() as cur:
-            execute_values(cur, upsert_sql, rows, page_size=100)
-            return cur.rowcount
-
-
-def upsert_report_snapshots(config: DatabaseConfig, rows: List[tuple[object, ...]]) -> int:
-    """Upsert report snapshot rows."""
-    if not rows:
-        return 0
-
-    normalized_rows = [
-        (
-            snapshot_date,
-            report_kind,
-            timeframe,
-            symbol,
-            title,
-            final_score,
-            regime_label,
-            recommendation_label,
-            summary_text,
-            risk_text,
-            _json_value(key_drivers_json),
-            report_markdown,
-            report_html,
-            storage_path,
-        )
-        for (
-            snapshot_date,
-            report_kind,
-            timeframe,
-            symbol,
-            title,
-            final_score,
-            regime_label,
-            recommendation_label,
-            summary_text,
-            risk_text,
-            key_drivers_json,
-            report_markdown,
-            report_html,
-            storage_path,
-        ) in rows
-    ]
-
-    upsert_sql = """
-        INSERT INTO report_snapshots (
-            snapshot_date,
-            report_kind,
-            timeframe,
-            symbol,
-            title,
-            final_score,
-            regime_label,
-            recommendation_label,
-            summary_text,
-            risk_text,
-            key_drivers_json,
-            report_markdown,
-            report_html,
-            storage_path
-        )
-        VALUES %s
-        ON CONFLICT (snapshot_date, report_kind, timeframe, symbol) DO UPDATE SET
-            title = EXCLUDED.title,
-            final_score = EXCLUDED.final_score,
-            regime_label = EXCLUDED.regime_label,
-            recommendation_label = EXCLUDED.recommendation_label,
-            summary_text = EXCLUDED.summary_text,
-            risk_text = EXCLUDED.risk_text,
-            key_drivers_json = EXCLUDED.key_drivers_json,
-            report_markdown = EXCLUDED.report_markdown,
-            report_html = EXCLUDED.report_html,
-            storage_path = EXCLUDED.storage_path,
-            updated_at = NOW()
-    """
-    with get_connection(config) as conn:
-        with conn.cursor() as cur:
-            execute_values(cur, upsert_sql, normalized_rows, page_size=100)
-            return cur.rowcount
-
-
 def delete_stock_indicators(
     config: DatabaseConfig,
     symbol: Optional[str] = None,
@@ -1059,20 +811,6 @@ def delete_stock_indicators(
         with conn.cursor() as cur:
             cur.execute(query, tuple(params))
             return cur.rowcount
-
-
-def get_ticker_metadata(config: DatabaseConfig) -> List[dict]:
-    """Fetch ticker metadata for analytics/reporting joins."""
-    with get_connection(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT symbol, name, sector, industry, updated_at
-                FROM tickers
-                ORDER BY symbol
-                """
-            )
-            return _rows_to_dicts(cur)
 
 
 def get_price_history_dataset(
@@ -1397,6 +1135,170 @@ def upsert_report_snapshots(config: DatabaseConfig, rows: List[dict]) -> int:
         with conn.cursor() as cur:
             execute_values(cur, upsert_sql, normalized_rows, page_size=128)
             return cur.rowcount
+
+
+def insert_report_export_job(config: DatabaseConfig, row: dict) -> int:
+    """Insert a manual report export job row."""
+    columns = (
+        "job_id",
+        "report_kind",
+        "timeframe",
+        "scope",
+        "status",
+        "snapshot_date",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "error_message",
+        "html_path",
+        "pdf_path",
+        "html_download_url",
+        "pdf_download_url",
+    )
+    normalized_rows = _prepare_dict_rows([row], columns)
+    insert_sql = """
+        INSERT INTO report_export_jobs (
+            job_id,
+            report_kind,
+            timeframe,
+            scope,
+            status,
+            snapshot_date,
+            created_at,
+            started_at,
+            completed_at,
+            error_message,
+            html_path,
+            pdf_path,
+            html_download_url,
+            pdf_download_url
+        )
+        VALUES %s
+    """
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            execute_values(cur, insert_sql, normalized_rows, page_size=1)
+            return cur.rowcount
+
+
+def update_report_export_job(config: DatabaseConfig, job_id: str, **updates: object) -> int:
+    """Update a manual report export job with the provided fields."""
+    if not updates:
+        return 0
+
+    allowed_columns = {
+        "status",
+        "snapshot_date",
+        "started_at",
+        "completed_at",
+        "error_message",
+        "html_path",
+        "pdf_path",
+        "html_download_url",
+        "pdf_download_url",
+    }
+    invalid_columns = sorted(set(updates) - allowed_columns)
+    if invalid_columns:
+        raise ValueError(f"Unsupported report export job columns: {', '.join(invalid_columns)}")
+
+    assignments = ", ".join(f"{column} = %s" for column in updates)
+    params = [updates[column] for column in updates]
+    params.append(job_id)
+    query = f"UPDATE report_export_jobs SET {assignments} WHERE job_id = %s"
+
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            return cur.rowcount
+
+
+def _decode_report_export_job_row(row: dict) -> dict:
+    """Normalize report export job rows returned from psycopg2."""
+    if not row:
+        return row
+    normalized = dict(row)
+    snapshot_date = normalized.get("snapshot_date")
+    if snapshot_date is not None:
+        normalized["snapshot_date"] = str(snapshot_date)
+    return normalized
+
+
+def get_report_export_job(config: DatabaseConfig, job_id: str) -> Optional[dict]:
+    """Return one manual report export job by id."""
+    query = """
+        SELECT
+            job_id,
+            report_kind,
+            timeframe,
+            scope,
+            status,
+            snapshot_date,
+            created_at,
+            started_at,
+            completed_at,
+            error_message,
+            html_path,
+            pdf_path,
+            html_download_url,
+            pdf_download_url
+        FROM report_export_jobs
+        WHERE job_id = %s
+        LIMIT 1
+    """
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (job_id,))
+            rows = _rows_to_dicts(cur)
+            return _decode_report_export_job_row(rows[0]) if rows else None
+
+
+def get_latest_report_export_job(
+    config: DatabaseConfig,
+    report_kind: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    scope: Optional[str] = None,
+    statuses: Optional[List[str]] = None,
+) -> Optional[dict]:
+    """Return the latest manual report export job matching the given filters."""
+    query = """
+        SELECT
+            job_id,
+            report_kind,
+            timeframe,
+            scope,
+            status,
+            snapshot_date,
+            created_at,
+            started_at,
+            completed_at,
+            error_message,
+            html_path,
+            pdf_path,
+            html_download_url,
+            pdf_download_url
+        FROM report_export_jobs
+        WHERE 1 = 1
+    """
+    params: List[object] = []
+    if report_kind is not None:
+        query += " AND report_kind = %s"
+        params.append(report_kind)
+    if timeframe is not None:
+        query += " AND timeframe = %s"
+        params.append(timeframe)
+    if scope is not None:
+        query += " AND scope = %s"
+        params.append(scope)
+    if statuses:
+        query += " AND status = ANY(%s)"
+        params.append(statuses)
+    query += " ORDER BY created_at DESC LIMIT 1"
+
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, tuple(params))
+            rows = _rows_to_dicts(cur)
+            return _decode_report_export_job_row(rows[0]) if rows else None
 
 
 def get_prior_signal_scores(

@@ -43,6 +43,8 @@ class FetchResult:
     dataframe: pd.DataFrame
     requested_symbols: list[str]
     successful_symbols: list[str]
+    changed_symbols: list[str]
+    upserted_row_count: int
     failed_symbols: list[str]
     recovered_symbols: list[str]
 
@@ -451,6 +453,8 @@ def fetch_historical_data(
         dataframe=combined,
         requested_symbols=list(tickers),
         successful_symbols=sorted(successful_symbols),
+        changed_symbols=[],
+        upserted_row_count=0,
         failed_symbols=sorted(failed_symbols),
         recovered_symbols=sorted(recovered_symbols),
     )

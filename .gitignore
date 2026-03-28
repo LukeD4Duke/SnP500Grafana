@@ -8,3 +8,7 @@ venv/
 *.egg-info/
 dist/
 build/
+reports/weekly/*.md
+reports/weekly/*.html
+reports/monthly/*.md
+reports/monthly/*.html

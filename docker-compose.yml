@@ -37,6 +37,7 @@ services:
       YFINANCE_DELAY_SEC: ${YFINANCE_DELAY_SEC:-2.5}
       HISTORICAL_START: ${HISTORICAL_START:-2020-01-01}
       BACKFILL_START: ${BACKFILL_START:-}
+      STARTUP_POST_SYNC_MODE: ${STARTUP_POST_SYNC_MODE:-background}
       INDICATORS_ENABLED: ${INDICATORS_ENABLED:-true}
       INDICATOR_INCREMENTAL_LOOKBACK_ROWS: ${INDICATOR_INCREMENTAL_LOOKBACK_ROWS:-1000}
       INDICATOR_REBUILD_ON_STARTUP: ${INDICATOR_REBUILD_ON_STARTUP:-false}
@@ -69,7 +70,8 @@ services:
       GF_SERVER_HTTP_PORT: 3000
       GF_SERVER_DOMAIN: ${GRAFANA_HOST:-localhost}
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3001}
-      GF_INSTALL_PLUGINS: ""
+      GF_RENDERING_SERVER_URL: http://grafana-image-renderer:8081/render
+      GF_RENDERING_CALLBACK_URL: http://grafana:3000/
     volumes:
       - grafana_data:/var/lib/grafana
     ports:
@@ -77,6 +79,40 @@ services:
       - "${GRAFANA_BIND_IP:-127.0.0.1}:${GRAFANA_PORT:-3001}:3000"
     depends_on:
       - timescaledb
+      - grafana-image-renderer
+
+  report-service:
+    build:
+      context: .
+      dockerfile: fetcher/Dockerfile
+    container_name: stock-report-service
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "uvicorn", "src.report_service:app", "--host", "0.0.0.0", "--port", "3000"]
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-stocks}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      GRAFANA_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required}
+      REPORT_OUTPUT_DIR: ${REPORT_OUTPUT_DIR:-/app/reports}
+      REPORT_UI_PUBLIC_URL: ${REPORT_UI_PUBLIC_URL:-http://localhost:3002}
+      GRAFANA_INTERNAL_URL: ${GRAFANA_INTERNAL_URL:-http://grafana:3000}
+    volumes:
+      - ./reports:/app/reports
+    ports:
+      - "${REPORT_UI_BIND_IP:-127.0.0.1}:${REPORT_UI_PORT:-3002}:3000"
+    depends_on:
+      - timescaledb
+      - grafana
+
+  grafana-image-renderer:
+    image: grafana/grafana-image-renderer:latest
+    container_name: stock-grafana-image-renderer
+    restart: unless-stopped
+    environment:
+      ENABLE_METRICS: "false"
 
 volumes:
   timescaledb_data:

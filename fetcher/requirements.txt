@@ -7,3 +7,6 @@ TA-Lib>=0.6.3
 psycopg2-binary>=2.9.9
 apscheduler>=3.10.0
 requests>=2.31.0
+fastapi>=0.115.0
+uvicorn>=0.32.0
+WeasyPrint>=62.3

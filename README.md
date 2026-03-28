@@ -8,7 +8,7 @@
 
 - **TimescaleDB**: time-series optimized PostgreSQL for stock prices, indicators, analytics snapshots, and stored report metadata
 - **stock-fetcher**: Python service that fetches data from Wikipedia (ticker list) and Yahoo Finance (OHLCV), persists indicators, refreshes analytics/rank snapshots, and writes weekly/monthly reports
-- **Grafana**: custom image with baked-in datasource provisioning and generated dashboards driven by ticker metadata, analytics snapshots, and report rows
+- **Grafana**: custom image with baked-in datasource provisioning and generated dashboards driven by ticker metadata, analytics snapshots, and report rows. The leaderboards dashboard links to a manual monthly report UI and the stack includes remote rendering support for downloadable report artifacts.
 
 ## Prerequisites
 
@@ -34,6 +34,10 @@
      - `GRAFANA_PORT` - defaults to `3001`
      - `GRAFANA_HOST` - defaults to `localhost`
      - `GRAFANA_ROOT_URL` - defaults to `http://localhost:3001`
+   - Optional manual report UI overrides:
+     - `REPORT_UI_BIND_IP` - defaults to `127.0.0.1`
+     - `REPORT_UI_PORT` - defaults to `3002`
+     - `REPORT_UI_PUBLIC_URL` - defaults to `http://localhost:3002`
    - Optional backfill override if you need to extend existing history earlier than the current earliest stored date:
      - `BACKFILL_START` - example `2000-01-01`
 
@@ -47,9 +51,11 @@
    docker compose logs -f stock-fetcher
    ```
 
+   On restarts against an already-populated database, the fetcher now becomes ready after schema init and the startup incremental OHLCV sync. Indicator refresh, analytics refresh, and report generation continue in a background catch-up job by default. Set `STARTUP_POST_SYNC_MODE=blocking` to restore the legacy behavior and keep startup blocked until those post-sync tasks finish.
+
    For an older-history backfill on a populated database, set `BACKFILL_START` and restart the stack. The fetcher will still run its normal startup incremental sync first, then fetch older data from `BACKFILL_START` up to the earliest date already in `stock_prices`.
 
-6. Open Grafana at `http://localhost:3001`, log in with the admin credentials, and open the dashboards under **Dashboards > S&P 500**.
+6. Open Grafana at `http://localhost:3001`, log in with the admin credentials, and open the dashboards under **Dashboards > S&P 500**. On the `S&P 500 Leaderboards` dashboard, use the `Generate Monthly Report` panel to open the report UI and start a monthly export.
 
 ## Dashboard Generation
 
@@ -59,6 +65,8 @@ Dashboard JSON is committed to the repo and baked into the Grafana image, so Gra
 pip install -r requirements-dev.txt
 python scripts/generate_dashboards.py
 ```
+
+If the manual report UI is hosted somewhere other than `http://localhost:3002`, set `REPORT_UI_PUBLIC_URL` before regenerating so the leaderboards launch panel points at the correct endpoint.
 
 Generated dashboards:
 
@@ -73,6 +81,11 @@ Generated dashboards:
 - `S&P 500 Relative Strength`
 - `S&P 500 Mean Reversion`
 
+The `S&P 500 Leaderboards` dashboard also includes:
+
+- a monthly-report launch panel that opens `REPORT_UI_PUBLIC_URL/monthly-report?autostart=1`
+- a latest manual export panel backed by `report_export_jobs`
+
 ## Analytics and Reports
 
 The fetcher now materializes additive analytics tables after OHLCV and indicator refreshes:
@@ -85,6 +98,8 @@ The fetcher now materializes additive analytics tables after OHLCV and indicator
 The analytics layer produces machine-readable block scores for trend, momentum, volume, relative strength, structure, mean reversion, and risk. Those snapshots drive both Grafana and the report generator.
 
 Weekly and monthly reports are generated as Markdown and HTML under `reports/` by default. The fetcher also stores report metadata and summary rows in `report_snapshots` so Grafana can surface the latest report output alongside rankings.
+
+For manual exports, the stack now includes a dedicated report UI at `REPORT_UI_PUBLIC_URL`. The Grafana launch panel opens that page, which generates a downloadable HTML report and PDF using Grafana-rendered panel images plus dashboard-by-dashboard explanations.
 
 ## Fetch Hardening
 
@@ -122,6 +137,9 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `GRAFANA_PORT` | `3001` | Published host port for Grafana |
 | `GRAFANA_HOST` | `localhost` | Grafana server domain |
 | `GRAFANA_ROOT_URL` | `http://localhost:3001` | Grafana public URL |
+| `REPORT_UI_BIND_IP` | `127.0.0.1` | Host IP for publishing the manual report UI |
+| `REPORT_UI_PORT` | `3002` | Published host port for the manual report UI |
+| `REPORT_UI_PUBLIC_URL` | `http://localhost:3002` | Public URL used by Grafana links to the manual report UI |
 | `DB_NAME` | `stocks` | Database name |
 | `DB_USER` | `postgres` | Database user |
 | `UPDATE_CRON` | `0 23 * * *` | Cron: daily at 11 PM UTC (6 PM ET) |
@@ -134,9 +152,10 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `YFINANCE_RETRY_DELAY` | `60` | Base retry delay in seconds before exponential backoff is applied |
 | `HISTORICAL_START` | `2020-01-01` | Start date for initial historical load |
 | `BACKFILL_START` | *(unset)* | Optional one-time startup backfill start date for older history on a populated database |
+| `STARTUP_POST_SYNC_MODE` | `background` | Populated-DB startup post-sync behavior: `background` starts the scheduler after OHLCV sync and defers indicators/analytics/reports to a one-shot catch-up job; `blocking` restores the legacy inline behavior |
 | `INDICATORS_ENABLED` | `true` | Enable persisted technical-indicator calculation after OHLCV syncs |
 | `INDICATOR_INCREMENTAL_LOOKBACK_ROWS` | `1000` | Row window used for normal incremental indicator refreshes per touched ticker |
-| `INDICATOR_REBUILD_ON_STARTUP` | `false` | Recompute all persisted indicators for all symbols during startup |
+| `INDICATOR_REBUILD_ON_STARTUP` | `false` | Recompute indicators from full history for symbols explicitly rebuilt during startup processing; it does not force a full-universe populated-DB startup block |
 | `INDICATOR_BATCH_SIZE` | `25` | Number of symbols processed per indicator refresh batch |
 | `ANALYTICS_ENABLED` | `true` | Enable additive analytics snapshot refresh after price and indicator updates |
 | `ANALYTICS_TIMEFRAMES` | `daily,weekly,monthly` | Comma-separated analytics snapshot cadences to materialize |
@@ -151,12 +170,13 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 |---------|------|-------------|
 | TimescaleDB | 5432 | PostgreSQL + TimescaleDB |
 | Grafana | 3001 | Dashboards and visualization, bound to `127.0.0.1:3001` by default |
+| Report UI | 3002 | Manual monthly report workflow, bound to `127.0.0.1:3002` by default |
 | stock-fetcher | - | Data fetcher and daily scheduler |
 
 ## Data Flow
 
 1. **Initial load**: On first start with an empty database, the fetcher downloads the S&P 500 ticker set from Wikipedia and historical OHLCV data from Yahoo Finance.
-2. **Restart behavior**: On later restarts, the fetcher performs an incremental sync instead of replaying the full historical backfill.
+2. **Restart behavior**: On later restarts, the fetcher performs an incremental sync instead of replaying the full historical backfill. By default, it starts the scheduler immediately after that sync and finishes indicators, analytics, and reports in the background for only the symbols touched by the startup sync.
 3. **Optional backfill**: If `BACKFILL_START` is set and the database already contains newer rows, the fetcher can backfill older history without clearing the database first.
 4. **Daily updates**: At the configured cron time, the fetcher reloads the last 7 days of data and upserts into the database.
 5. **Indicator derivation**: After each OHLCV sync, derived indicators are computed from the stored bars and persisted for Grafana use.

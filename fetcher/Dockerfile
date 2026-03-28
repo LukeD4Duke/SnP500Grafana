@@ -6,7 +6,19 @@ ARG TA_LIB_VERSION=0.6.4
 
 # Install TA-Lib native library and Python dependencies.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ca-certificates wget \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        fonts-dejavu-core \
+        libcairo2 \
+        libffi-dev \
+        libgdk-pixbuf-2.0-0 \
+        libharfbuzz0b \
+        libharfbuzz-subset0 \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        shared-mime-info \
+        wget \
     && wget -q "https://github.com/TA-Lib/ta-lib/releases/download/v${TA_LIB_VERSION}/ta-lib-${TA_LIB_VERSION}-src.tar.gz" \
     && tar -xzf "ta-lib-${TA_LIB_VERSION}-src.tar.gz" \
     && cd "ta-lib-${TA_LIB_VERSION}" \
