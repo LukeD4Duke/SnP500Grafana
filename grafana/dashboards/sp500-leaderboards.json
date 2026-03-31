@@ -290,7 +290,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, rs.final_score AS score\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bull_rank ASC, rs.symbol\nLIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, rs.final_score AS score\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND ('${sector}' IN ('__all', '$__all', 'All') OR COALESCE(t.sector, '') = '${sector}')\nORDER BY rs.bull_rank ASC, rs.symbol\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -377,7 +377,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, rs.final_score AS score\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bear_rank ASC, rs.symbol\nLIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, rs.final_score AS score\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND ('${sector}' IN ('__all', '$__all', 'All') OR COALESCE(t.sector, '') = '${sector}')\nORDER BY rs.bear_rank ASC, rs.symbol\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -453,7 +453,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bull_rank, rs.final_score, rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bull_rank ASC, rs.symbol\nLIMIT 25",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bull_rank, rs.final_score, rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND ('${sector}' IN ('__all', '$__all', 'All') OR COALESCE(t.sector, '') = '${sector}')\nORDER BY rs.bull_rank ASC, rs.symbol\nLIMIT 25",
           "refId": "A"
         }
       ],
@@ -529,7 +529,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bear_rank, rs.final_score, rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY rs.bear_rank ASC, rs.symbol\nLIMIT 25",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM rank_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT rs.symbol AS ticker, COALESCE(t.name, rs.symbol) AS company_name, rs.bear_rank, rs.final_score, rs.score_change_1w, rs.score_change_1m, rs.regime_label, rs.recommendation_label\nFROM rank_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nLEFT JOIN tickers t ON t.symbol = rs.symbol\nWHERE rs.timeframe = '${timeframe}' AND ('${sector}' IN ('__all', '$__all', 'All') OR COALESCE(t.sector, '') = '${sector}')\nORDER BY rs.bear_rank ASC, rs.symbol\nLIMIT 25",
           "refId": "A"
         }
       ],
@@ -586,12 +586,15 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM report_snapshots WHERE timeframe = '${timeframe}' AND report_kind = '${report_kind}'\n)\nSELECT rs.report_kind, rs.title, rs.summary_text, rs.risk_text, rs.storage_path\nFROM report_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nWHERE rs.timeframe = '${timeframe}' AND rs.report_kind = '${report_kind}' AND rs.symbol = '__MARKET__'",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM report_snapshots WHERE timeframe = '${timeframe}' AND report_kind = CASE WHEN '${timeframe}' IN ('weekly', 'monthly') THEN '${timeframe}' ELSE '__none__' END\n)\nSELECT rs.report_kind, rs.title, rs.summary_text, rs.risk_text, rs.storage_path\nFROM report_snapshots rs\nJOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\nWHERE rs.timeframe = '${timeframe}' AND rs.report_kind = CASE WHEN '${timeframe}' IN ('weekly', 'monthly') THEN '${timeframe}' ELSE '__none__' END AND rs.symbol = '__MARKET__'",
           "refId": "A"
         }
       ],
       "title": "Latest Report Snapshot",
-      "type": "table"
+      "type": "table",
+      "repeat": "report_snapshot_visible",
+      "repeatDirection": "h",
+      "maxPerRow": 1
     },
     {
       "datasource": {
@@ -825,34 +828,24 @@
         "allValue": "__all"
       },
       {
-        "current": {
-          "selected": true,
-          "text": "weekly",
-          "value": "weekly"
+        "current": {},
+        "datasource": {
+          "type": "postgres",
+          "uid": "timescaledb"
         },
-        "definition": "weekly,monthly",
-        "hide": 0,
+        "definition": "SELECT 'show' WHERE '${timeframe}' IN ('weekly', 'monthly')",
+        "hide": 2,
         "includeAll": false,
-        "label": "Report",
+        "label": "Report Snapshot Visible",
         "multi": false,
-        "name": "report_kind",
-        "options": [
-          {
-            "selected": true,
-            "text": "weekly",
-            "value": "weekly"
-          },
-          {
-            "selected": false,
-            "text": "monthly",
-            "value": "monthly"
-          }
-        ],
-        "query": "weekly,monthly",
-        "refresh": 0,
+        "name": "report_snapshot_visible",
+        "options": [],
+        "query": "SELECT 'show' WHERE '${timeframe}' IN ('weekly', 'monthly')",
+        "refresh": 2,
+        "regex": "",
         "skipUrlSync": false,
-        "sort": 0,
-        "type": "custom"
+        "sort": 1,
+        "type": "query"
       }
     ]
   },

@@ -438,7 +438,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT ss.symbol AS ticker, ss.mean_reversion_score AS score\nFROM signal_snapshots ss\nJOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date\nLEFT JOIN tickers t ON t.symbol = ss.symbol\nWHERE ss.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY ss.mean_reversion_score DESC, ss.symbol\nLIMIT 20",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT ss.symbol AS ticker, ss.mean_reversion_score AS score\nFROM signal_snapshots ss\nJOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date\nLEFT JOIN tickers t ON t.symbol = ss.symbol\nWHERE ss.timeframe = '${timeframe}' AND ('${sector}' IN ('__all', '$__all', 'All') OR COALESCE(t.sector, '') = '${sector}')\nORDER BY ss.mean_reversion_score DESC, ss.symbol\nLIMIT 20",
           "refId": "A"
         }
       ],
@@ -514,7 +514,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.mean_reversion_score, ss.momentum_score, ss.overbought_flag, ss.oversold_flag, ss.final_score, ss.recommendation_label\nFROM signal_snapshots ss\nJOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date\nLEFT JOIN tickers t ON t.symbol = ss.symbol\nWHERE ss.timeframe = '${timeframe}' AND (${sector:sqlstring} = '__all' OR COALESCE(t.sector, '') = ${sector:sqlstring})\nORDER BY ss.mean_reversion_score DESC, ss.symbol\nLIMIT 50",
+          "rawSql": "WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM signal_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT ss.symbol AS ticker, COALESCE(t.name, ss.symbol) AS company_name, ss.mean_reversion_score, ss.momentum_score, ss.overbought_flag, ss.oversold_flag, ss.final_score, ss.recommendation_label\nFROM signal_snapshots ss\nJOIN latest_snapshot ls ON ls.snapshot_date = ss.snapshot_date\nLEFT JOIN tickers t ON t.symbol = ss.symbol\nWHERE ss.timeframe = '${timeframe}' AND ('${sector}' IN ('__all', '$__all', 'All') OR COALESCE(t.sector, '') = '${sector}')\nORDER BY ss.mean_reversion_score DESC, ss.symbol\nLIMIT 50",
           "refId": "A"
         }
       ],

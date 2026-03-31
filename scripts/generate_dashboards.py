@@ -13,14 +13,19 @@ DASHBOARD_DIR = ROOT / "grafana" / "dashboards"
 DATASOURCE = {"type": "postgres", "uid": "timescaledb"}
 TIME_RANGE = {"from": "now-1y", "to": "now"}
 ALL_SENTINEL = "__all"
+GRAFANA_ALL_SENTINEL = "$__all"
 REPORT_UI_PUBLIC_URL = os.environ.get("REPORT_UI_PUBLIC_URL", "http://localhost:3002").rstrip("/")
 TIMEFRAME_VALUES = ["daily", "weekly", "monthly"]
 REPORT_KIND_VALUES = ["weekly", "monthly"]
+SECTOR_VALUE_SQL = "'${sector}'"
+REPORT_KIND_FROM_TIMEFRAME_SQL = "CASE WHEN '${timeframe}' IN ('weekly', 'monthly') THEN '${timeframe}' ELSE '__none__' END"
 SECTOR_FILTER_SQL = (
-    f"(${{sector:sqlstring}} = '{ALL_SENTINEL}' OR COALESCE(t.sector, '') = ${{sector:sqlstring}})"
+    f"({SECTOR_VALUE_SQL} IN ('{ALL_SENTINEL}', '{GRAFANA_ALL_SENTINEL}', 'All') "
+    f"OR COALESCE(t.sector, '') = {SECTOR_VALUE_SQL})"
 )
 TICKER_VARIABLE_SECTOR_FILTER_SQL = (
-    f"(${{sector:sqlstring}} = '{ALL_SENTINEL}' OR COALESCE(sector, '') = ${{sector:sqlstring}})"
+    f"({SECTOR_VALUE_SQL} IN ('{ALL_SENTINEL}', '{GRAFANA_ALL_SENTINEL}', 'All') "
+    f"OR COALESCE(sector, '') = {SECTOR_VALUE_SQL})"
 )
 
 
@@ -102,12 +107,13 @@ def query_variable(
     refresh: int,
     *,
     include_all: bool = True,
+    hide: int = 0,
 ) -> dict:
     variable = {
         "current": {"selected": True, "text": "All", "value": ALL_SENTINEL} if include_all else {},
         "datasource": DATASOURCE,
         "definition": query,
-        "hide": 0,
+        "hide": hide,
         "includeAll": include_all,
         "label": label,
         "multi": False,
@@ -261,13 +267,13 @@ def latest_report_sql(select_sql: str) -> str:
     return (
         latest_snapshot_cte(
             "report_snapshots",
-            filters=["timeframe = '${timeframe}'", "report_kind = '${report_kind}'"],
+            filters=["timeframe = '${timeframe}'", f"report_kind = {REPORT_KIND_FROM_TIMEFRAME_SQL}"],
         )
         + "SELECT "
         + select_sql
         + "\nFROM report_snapshots rs\n"
         + "JOIN latest_snapshot ls ON ls.snapshot_date = rs.snapshot_date\n"
-        + "WHERE rs.timeframe = '${timeframe}' AND rs.report_kind = '${report_kind}'"
+        + f"WHERE rs.timeframe = '${{timeframe}}' AND rs.report_kind = {REPORT_KIND_FROM_TIMEFRAME_SQL}"
     )
 
 
@@ -310,8 +316,9 @@ def table_panel(
     h: int,
     show_header: bool = True,
     overrides: list[dict] | None = None,
+    repeat_variable: str | None = None,
 ) -> dict:
-    return {
+    panel = {
         "datasource": DATASOURCE,
         "fieldConfig": {
             "defaults": {
@@ -337,6 +344,11 @@ def table_panel(
         "title": title,
         "type": "table",
     }
+    if repeat_variable:
+        panel["repeat"] = repeat_variable
+        panel["repeatDirection"] = "h"
+        panel["maxPerRow"] = 1
+    return panel
 
 
 def text_panel(
@@ -820,7 +832,17 @@ def leaderboard_dashboard() -> dict:
         "sp500-leaderboards",
         ["sp500", "leaderboards", "generated"],
     )
-    dashboard["templating"]["list"] = analytics_variables(include_sector=True, include_report_kind=True)
+    dashboard["templating"]["list"] = analytics_variables(include_sector=True)
+    dashboard["templating"]["list"].append(
+        query_variable(
+            "report_snapshot_visible",
+            "Report Snapshot Visible",
+            "SELECT 'show' WHERE '${timeframe}' IN ('weekly', 'monthly')",
+            2,
+            include_all=False,
+            hide=2,
+        )
+    )
     dashboard["panels"] = [
         text_panel(
             panel_id=1,
@@ -941,6 +963,7 @@ def leaderboard_dashboard() -> dict:
             y=31,
             w=24,
             h=7,
+            repeat_variable="report_snapshot_visible",
         ),
         pie_chart_panel(
             panel_id=8,
