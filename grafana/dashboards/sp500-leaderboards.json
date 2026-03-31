@@ -105,7 +105,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 0
+        "y": 26
       },
       "id": 1,
       "options": {
@@ -184,7 +184,7 @@
         "h": 5,
         "w": 16,
         "x": 8,
-        "y": 0
+        "y": 26
       },
       "id": 2,
       "options": {
@@ -567,7 +567,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 31
       },
       "id": 7,
       "options": {
@@ -592,6 +592,166 @@
       ],
       "title": "Latest Report Snapshot",
       "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 8,
+      "options": {
+        "displayLabels": [
+          "name",
+          "value",
+          "percent"
+        ],
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT bullish_count AS \"Bullish\", neutral_count AS \"Neutral\", bearish_count AS \"Bearish\" FROM (WITH latest_snapshot AS (\n    SELECT MAX(snapshot_date) AS snapshot_date FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'\n)\nSELECT bullish_count, neutral_count, bearish_count\nFROM market_breadth_snapshots mbs\nJOIN latest_snapshot ls ON ls.snapshot_date = mbs.snapshot_date\nWHERE mbs.timeframe = '${timeframe}') breadth",
+          "refId": "A"
+        }
+      ],
+      "title": "Setup Distribution",
+      "type": "piechart"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "timescaledb"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 12,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 16,
+        "x": 8,
+        "y": 0
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "timescaledb"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT snapshot_date::timestamp AS time, avg_final_score AS \"Average\", median_final_score AS \"Median\" FROM market_breadth_snapshots WHERE timeframe = '${timeframe}'   AND $__timeFilter(snapshot_date::timestamp) ORDER BY snapshot_date",
+          "refId": "A"
+        }
+      ],
+      "title": "Composite Score History",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

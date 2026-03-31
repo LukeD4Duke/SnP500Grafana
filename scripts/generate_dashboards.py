@@ -289,6 +289,16 @@ def ticker_link_override(field_name: str = "ticker") -> dict:
     }
 
 
+def markdown_cell_override(field_name: str, *, align: str = "center") -> dict:
+    return {
+        "matcher": {"id": "byName", "options": field_name},
+        "properties": [
+            {"id": "custom.cellOptions", "value": {"type": "markdown"}},
+            {"id": "custom.align", "value": align},
+        ],
+    }
+
+
 def table_panel(
     *,
     panel_id: int,
@@ -480,6 +490,50 @@ def timeseries_panel(
     }
 
 
+def pie_chart_panel(
+    *,
+    panel_id: int,
+    title: str,
+    sql: str,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+) -> dict:
+    return {
+        "datasource": DATASOURCE,
+        "fieldConfig": {
+            "defaults": {
+                "color": {"mode": "palette-classic"},
+                "mappings": [],
+                "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
+            },
+            "overrides": [],
+        },
+        "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "id": panel_id,
+        "options": {
+            "displayLabels": ["name", "value", "percent"],
+            "legend": {"displayMode": "list", "placement": "right", "showLegend": True, "values": ["value"]},
+            "pieType": "pie",
+            "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
+            "tooltip": {"mode": "single", "sort": "none"},
+        },
+        "targets": [
+            {
+                "datasource": DATASOURCE,
+                "editorMode": "code",
+                "format": "table",
+                "rawQuery": True,
+                "rawSql": sql,
+                "refId": "A",
+            }
+        ],
+        "title": title,
+        "type": "piechart",
+    }
+
+
 def bar_chart_panel(
     *,
     panel_id: int,
@@ -603,8 +657,8 @@ def ticker_detail_dashboard() -> dict:
             panel_id=1,
             title="Company",
             sql=(
-                "SELECT '<div style=\"font-size:26px;font-weight:600;text-align:center;line-height:1.2;\">' "
-                "|| COALESCE(name, symbol) || '</div>' AS company "
+                "SELECT '<div style=\"font-size:26px;font-weight:700;text-align:center;line-height:1.2;"
+                "color:#4ea1ff;\">' || COALESCE(name, symbol) || '</div>' AS company "
                 "FROM tickers WHERE symbol = '${ticker}'"
             ),
             x=0,
@@ -612,23 +666,40 @@ def ticker_detail_dashboard() -> dict:
             w=6,
             h=4,
             show_header=False,
+            overrides=[markdown_cell_override("company")],
         ),
-        stat_panel(
+        table_panel(
             panel_id=2,
             title="Last Close",
-            sql="SELECT close AS value FROM stock_prices WHERE symbol = '${ticker}' ORDER BY timestamp DESC LIMIT 1",
+            sql=(
+                "SELECT '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#73BF69;\">$' "
+                "|| TO_CHAR(close, 'FM999,999,999,990.0') || '</div>' AS last_close "
+                "FROM stock_prices WHERE symbol = '${ticker}' ORDER BY timestamp DESC LIMIT 1"
+            ),
             x=6,
             y=0,
             w=6,
             h=4,
-            unit="currencyUSD",
-            decimals=2,
+            show_header=False,
+            overrides=[markdown_cell_override("last_close")],
         ),
-        stat_panel(
+        table_panel(
             panel_id=3,
             title="Final Score",
             sql=(
-                "SELECT final_score AS value FROM signal_snapshots "
+                "SELECT "
+                "CASE "
+                "WHEN recommendation_label IN ('bullish', 'bullish watch') THEN "
+                "    '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#2da44e;\">' "
+                "    || ROUND(final_score::numeric, 1)::text || '</div>' "
+                "WHEN recommendation_label = 'neutral' THEN "
+                "    '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#c9d1d9;\">' "
+                "    || ROUND(final_score::numeric, 1)::text || '</div>' "
+                "ELSE "
+                "    '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#f85149;\">' "
+                "    || ROUND(final_score::numeric, 1)::text || '</div>' "
+                "END AS final_score "
+                "FROM signal_snapshots "
                 "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
                 "ORDER BY snapshot_date DESC LIMIT 1"
             ),
@@ -636,13 +707,20 @@ def ticker_detail_dashboard() -> dict:
             y=0,
             w=6,
             h=4,
-            decimals=1,
+            show_header=False,
+            overrides=[markdown_cell_override("final_score")],
         ),
-        stat_panel(
+        table_panel(
             panel_id=4,
             title="Recommendation",
             sql=(
-                "SELECT recommendation_label AS value FROM signal_snapshots "
+                "SELECT "
+                "'<div style=\"font-size:14px;line-height:1.35;white-space:normal;overflow:visible;\">"
+                "<strong>Recommendation:</strong> ' || recommendation_label "
+                "|| ' | <strong>Regime:</strong> ' || regime_label "
+                "|| ' | <strong>Volatility:</strong> ' || volatility_state "
+                "|| '</div>' AS recommendation "
+                "FROM signal_snapshots "
                 "WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' "
                 "ORDER BY snapshot_date DESC LIMIT 1"
             ),
@@ -650,6 +728,8 @@ def ticker_detail_dashboard() -> dict:
             y=0,
             w=6,
             h=4,
+            show_header=False,
+            overrides=[markdown_cell_override("recommendation", align="left")],
         ),
         timeseries_panel(
             panel_id=5,
@@ -710,8 +790,17 @@ def ticker_detail_dashboard() -> dict:
                 "SELECT "
                 "    latest_signal.snapshot_date, "
                 "    COALESCE(driver.value->>'label', driver.value->>'metric', driver.value->>'name', 'driver') AS driver, "
-                "    COALESCE(driver.value->>'state', '') AS state, "
                 "    COALESCE(NULLIF(driver.value->>'score', ''), driver.value->>'value', '') AS score, "
+                "    CASE COALESCE(driver.value->>'key', '') "
+                "        WHEN 'trend_score' THEN 'Direction and persistence strength' "
+                "        WHEN 'momentum_score' THEN 'Speed of recent price move' "
+                "        WHEN 'relative_strength_score' THEN 'Performance versus peer stocks' "
+                "        WHEN 'rsi' THEN 'Overbought or oversold pressure' "
+                "        WHEN 'volume_ratio' THEN 'Trading activity versus normal' "
+                "        WHEN 'atr_pct' THEN 'Volatility relative to price' "
+                "        ELSE 'Short driver summary' "
+                "    END AS explanation, "
+                "    COALESCE(driver.value->>'state', '') AS state, "
                 "    COALESCE(driver.value->>'detail', driver.value->>'explanation', '') AS detail "
                 "FROM latest_signal "
                 "CROSS JOIN LATERAL jsonb_array_elements(latest_signal.drivers_json) AS driver(value)"
@@ -752,7 +841,7 @@ def leaderboard_dashboard() -> dict:
                 "</div>"
             ),
             x=0,
-            y=0,
+            y=26,
             w=8,
             h=5,
         ),
@@ -775,7 +864,7 @@ def leaderboard_dashboard() -> dict:
                 "FROM latest_job"
             ),
             x=8,
-            y=0,
+            y=26,
             w=16,
             h=5,
             overrides=[
@@ -849,9 +938,39 @@ def leaderboard_dashboard() -> dict:
                 + " AND rs.symbol = '__MARKET__'"
             ),
             x=0,
-            y=26,
+            y=31,
             w=24,
             h=7,
+        ),
+        pie_chart_panel(
+            panel_id=8,
+            title="Setup Distribution",
+            sql=(
+                "SELECT bullish_count AS \"Bullish\", neutral_count AS \"Neutral\", bearish_count AS \"Bearish\" "
+                "FROM ("
+                + latest_breadth_sql("bullish_count, neutral_count, bearish_count")
+                + ") breadth"
+            ),
+            x=0,
+            y=0,
+            w=8,
+            h=5,
+        ),
+        timeseries_panel(
+            panel_id=9,
+            title="Composite Score History",
+            sql=(
+                "SELECT snapshot_date::timestamp AS time, avg_final_score AS \"Average\", "
+                "median_final_score AS \"Median\" "
+                "FROM market_breadth_snapshots "
+                "WHERE timeframe = '${timeframe}' "
+                "  AND $__timeFilter(snapshot_date::timestamp) "
+                "ORDER BY snapshot_date"
+            ),
+            x=8,
+            y=0,
+            w=16,
+            h=5,
         ),
     ]
     return dashboard

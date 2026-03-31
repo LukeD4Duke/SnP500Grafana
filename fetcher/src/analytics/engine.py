@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Iterable
 
 import pandas as pd
@@ -583,8 +583,8 @@ def _build_prior_score_lookup(prior_scores: pd.DataFrame, timeframe: str, snapsh
     for symbol, symbol_rows in timeframe_rows.groupby("symbol", sort=True):
         symbol_rows = symbol_rows.sort_values("snapshot_date")
         for delta_days in (7, 30):
-            target = current_date - pd.Timedelta(days=delta_days)
-            eligible = symbol_rows.loc[symbol_rows["snapshot_date"] <= target.date()]
+            target_date = current_date - timedelta(days=delta_days)
+            eligible = symbol_rows.loc[symbol_rows["snapshot_date"] <= target_date]
             if not eligible.empty:
                 lookup[(str(symbol), delta_days)] = float(eligible.iloc[-1]["final_score"])
     return lookup

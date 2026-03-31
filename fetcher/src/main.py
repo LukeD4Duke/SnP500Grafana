@@ -308,13 +308,12 @@ def run_post_sync_tasks(
     """Refresh indicators, then analytics, then reports in order."""
     if not symbols:
         logger.info("Skipping indicator refresh because no persisted OHLCV changes were detected")
-        logger.info("Skipping analytics and report refresh because no persisted OHLCV changes were detected")
-        return
-    refresh_indicators(
-        symbols,
-        price_frame=price_frame,
-        force_rebuild=force_rebuild,
-    )
+    else:
+        refresh_indicators(
+            symbols,
+            price_frame=price_frame,
+            force_rebuild=force_rebuild,
+        )
     refresh_analytics()
     generate_configured_reports()
 
@@ -475,18 +474,15 @@ def main() -> None:
                 force_rebuild=indicator_config.rebuild_on_startup,
             )
         else:
-            if startup_result.changed_symbols:
-                logger.info(
-                    "Deferring populated-DB startup post-sync tasks to background catch-up "
-                    "(STARTUP_POST_SYNC_MODE=background)"
-                )
-                startup_catchup_kwargs = {
-                    "symbols": startup_result.changed_symbols,
-                    "price_frame": startup_result.dataframe,
-                    "force_rebuild": indicator_config.rebuild_on_startup,
-                }
-            else:
-                logger.info("Skipping startup post-sync catch-up scheduling because no persisted OHLCV changes were detected")
+            logger.info(
+                "Deferring populated-DB startup post-sync tasks to background catch-up "
+                "(STARTUP_POST_SYNC_MODE=background)"
+            )
+            startup_catchup_kwargs = {
+                "symbols": startup_result.changed_symbols,
+                "price_frame": startup_result.dataframe,
+                "force_rebuild": indicator_config.rebuild_on_startup,
+            }
         min_price_date, max_price_date = get_price_date_bounds(db_config)
         logger.info(
             "Current price data range after incremental sync: %s to %s",

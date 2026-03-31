@@ -125,7 +125,26 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "company"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "markdown"
+                }
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 4,
@@ -150,7 +169,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT '<div style=\"font-size:26px;font-weight:600;text-align:center;line-height:1.2;\">' || COALESCE(name, symbol) || '</div>' AS company FROM tickers WHERE symbol = '${ticker}'",
+          "rawSql": "SELECT '<div style=\"font-size:26px;font-weight:700;text-align:center;line-height:1.2;color:#4ea1ff;\">' || COALESCE(name, symbol) || '</div>' AS company FROM tickers WHERE symbol = '${ticker}'",
           "refId": "A"
         }
       ],
@@ -164,8 +183,12 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
           },
           "mappings": [],
           "thresholds": {
@@ -176,11 +199,28 @@
                 "value": null
               }
             ]
-          },
-          "unit": "currencyUSD",
-          "decimals": 2
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last_close"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "markdown"
+                }
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 4,
@@ -190,21 +230,11 @@
       },
       "id": 2,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "showHeader": false
       },
       "targets": [
         {
@@ -215,12 +245,12 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT close AS value FROM stock_prices WHERE symbol = '${ticker}' ORDER BY timestamp DESC LIMIT 1",
+          "rawSql": "SELECT '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#73BF69;\">$' || TO_CHAR(close, 'FM999,999,999,990.0') || '</div>' AS last_close FROM stock_prices WHERE symbol = '${ticker}' ORDER BY timestamp DESC LIMIT 1",
           "refId": "A"
         }
       ],
       "title": "Last Close",
-      "type": "stat"
+      "type": "table"
     },
     {
       "datasource": {
@@ -229,8 +259,12 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
           },
           "mappings": [],
           "thresholds": {
@@ -241,11 +275,28 @@
                 "value": null
               }
             ]
-          },
-          "unit": "none",
-          "decimals": 1
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "final_score"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "markdown"
+                }
+              },
+              {
+                "id": "custom.align",
+                "value": "center"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 4,
@@ -255,21 +306,11 @@
       },
       "id": 3,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "showHeader": false
       },
       "targets": [
         {
@@ -280,12 +321,12 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT final_score AS value FROM signal_snapshots WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date DESC LIMIT 1",
+          "rawSql": "SELECT CASE WHEN recommendation_label IN ('bullish', 'bullish watch') THEN     '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#2da44e;\">'     || ROUND(final_score::numeric, 1)::text || '</div>' WHEN recommendation_label = 'neutral' THEN     '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#c9d1d9;\">'     || ROUND(final_score::numeric, 1)::text || '</div>' ELSE     '<div style=\"font-size:28px;font-weight:700;text-align:center;color:#f85149;\">'     || ROUND(final_score::numeric, 1)::text || '</div>' END AS final_score FROM signal_snapshots WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date DESC LIMIT 1",
           "refId": "A"
         }
       ],
       "title": "Final Score",
-      "type": "stat"
+      "type": "table"
     },
     {
       "datasource": {
@@ -294,8 +335,12 @@
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
           },
           "mappings": [],
           "thresholds": {
@@ -306,10 +351,28 @@
                 "value": null
               }
             ]
-          },
-          "unit": "none"
+          }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "recommendation"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "markdown"
+                }
+              },
+              {
+                "id": "custom.align",
+                "value": "left"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 4,
@@ -319,21 +382,11 @@
       },
       "id": 4,
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "showHeader": false
       },
       "targets": [
         {
@@ -344,12 +397,12 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT recommendation_label AS value FROM signal_snapshots WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date DESC LIMIT 1",
+          "rawSql": "SELECT '<div style=\"font-size:14px;line-height:1.35;white-space:normal;overflow:visible;\"><strong>Recommendation:</strong> ' || recommendation_label || ' | <strong>Regime:</strong> ' || regime_label || ' | <strong>Volatility:</strong> ' || volatility_state || '</div>' AS recommendation FROM signal_snapshots WHERE symbol = '${ticker}' AND timeframe = '${timeframe}' ORDER BY snapshot_date DESC LIMIT 1",
           "refId": "A"
         }
       ],
       "title": "Recommendation",
-      "type": "stat"
+      "type": "table"
     },
     {
       "datasource": {
@@ -632,7 +685,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "WITH latest_signal AS (    SELECT snapshot_date, drivers_json     FROM signal_snapshots     WHERE symbol = '${ticker}' AND timeframe = '${timeframe}'     ORDER BY snapshot_date DESC LIMIT 1) SELECT     latest_signal.snapshot_date,     COALESCE(driver.value->>'label', driver.value->>'metric', driver.value->>'name', 'driver') AS driver,     COALESCE(driver.value->>'state', '') AS state,     COALESCE(NULLIF(driver.value->>'score', ''), driver.value->>'value', '') AS score,     COALESCE(driver.value->>'detail', driver.value->>'explanation', '') AS detail FROM latest_signal CROSS JOIN LATERAL jsonb_array_elements(latest_signal.drivers_json) AS driver(value)",
+          "rawSql": "WITH latest_signal AS (    SELECT snapshot_date, drivers_json     FROM signal_snapshots     WHERE symbol = '${ticker}' AND timeframe = '${timeframe}'     ORDER BY snapshot_date DESC LIMIT 1) SELECT     latest_signal.snapshot_date,     COALESCE(driver.value->>'label', driver.value->>'metric', driver.value->>'name', 'driver') AS driver,     COALESCE(NULLIF(driver.value->>'score', ''), driver.value->>'value', '') AS score,     CASE COALESCE(driver.value->>'key', '')         WHEN 'trend_score' THEN 'Direction and persistence strength'         WHEN 'momentum_score' THEN 'Speed of recent price move'         WHEN 'relative_strength_score' THEN 'Performance versus peer stocks'         WHEN 'rsi' THEN 'Overbought or oversold pressure'         WHEN 'volume_ratio' THEN 'Trading activity versus normal'         WHEN 'atr_pct' THEN 'Volatility relative to price'         ELSE 'Short driver summary'     END AS explanation,     COALESCE(driver.value->>'state', '') AS state,     COALESCE(driver.value->>'detail', driver.value->>'explanation', '') AS detail FROM latest_signal CROSS JOIN LATERAL jsonb_array_elements(latest_signal.drivers_json) AS driver(value)",
           "refId": "A"
         }
       ],
