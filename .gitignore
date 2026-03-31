@@ -12,3 +12,5 @@ reports/weekly/*.md
 reports/weekly/*.html
 reports/monthly/*.md
 reports/monthly/*.html
+reports/manual/
+tmp*/
