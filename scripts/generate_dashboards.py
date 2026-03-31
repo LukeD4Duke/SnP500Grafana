@@ -305,6 +305,13 @@ def markdown_cell_override(field_name: str, *, align: str = "center") -> dict:
     }
 
 
+def fixed_color_override(field_name: str, color: str) -> dict:
+    return {
+        "matcher": {"id": "byName", "options": field_name},
+        "properties": [{"id": "color", "value": {"fixedColor": color, "mode": "fixed"}}],
+    }
+
+
 def table_panel(
     *,
     panel_id: int,
@@ -451,6 +458,7 @@ def timeseries_panel(
     w: int,
     h: int,
     unit: str = "none",
+    overrides: list[dict] | None = None,
 ) -> dict:
     return {
         "datasource": DATASOURCE,
@@ -479,7 +487,7 @@ def timeseries_panel(
                 "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
                 "unit": unit,
             },
-            "overrides": [],
+            "overrides": overrides or [],
         },
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "id": panel_id,
@@ -511,6 +519,7 @@ def pie_chart_panel(
     y: int,
     w: int,
     h: int,
+    overrides: list[dict] | None = None,
 ) -> dict:
     return {
         "datasource": DATASOURCE,
@@ -520,7 +529,7 @@ def pie_chart_panel(
                 "mappings": [],
                 "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": None}]},
             },
-            "overrides": [],
+            "overrides": overrides or [],
         },
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "id": panel_id,
@@ -557,7 +566,28 @@ def bar_chart_panel(
     h: int,
     x_field: str,
     overrides: list[dict] | None = None,
+    show_value: str = "auto",
+    value_text_size: int | None = None,
 ) -> dict:
+    options = {
+        "barRadius": 0,
+        "barWidth": 0.9,
+        "colorByField": None,
+        "fullHighlight": False,
+        "groupWidth": 0.8,
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": False},
+        "orientation": "vertical",
+        "showValue": show_value,
+        "stacking": "none",
+        "tooltip": {"mode": "single", "sort": "none"},
+        "xField": x_field,
+        "xTickLabelMaxLength": 12,
+        "xTickLabelRotation": 30,
+        "xTickLabelSpacing": 0,
+    }
+    if value_text_size is not None:
+        options["text"] = {"valueSize": value_text_size}
+
     return {
         "datasource": DATASOURCE,
         "fieldConfig": {
@@ -582,22 +612,7 @@ def bar_chart_panel(
         },
         "gridPos": {"h": h, "w": w, "x": x, "y": y},
         "id": panel_id,
-        "options": {
-            "barRadius": 0,
-            "barWidth": 0.9,
-            "colorByField": None,
-            "fullHighlight": False,
-            "groupWidth": 0.8,
-            "legend": {"displayMode": "list", "placement": "bottom", "showLegend": False},
-            "orientation": "vertical",
-            "showValue": "auto",
-            "stacking": "none",
-            "tooltip": {"mode": "single", "sort": "none"},
-            "xField": x_field,
-            "xTickLabelMaxLength": 12,
-            "xTickLabelRotation": 30,
-            "xTickLabelSpacing": 0,
-        },
+        "options": options,
         "targets": [
             {
                 "datasource": DATASOURCE,
@@ -907,6 +922,8 @@ def leaderboard_dashboard() -> dict:
             w=12,
             h=9,
             x_field="ticker",
+            show_value="always",
+            value_text_size=10,
         ),
         bar_chart_panel(
             panel_id=4,
@@ -921,6 +938,9 @@ def leaderboard_dashboard() -> dict:
             w=12,
             h=9,
             x_field="ticker",
+            overrides=[fixed_color_override("score", "red")],
+            show_value="always",
+            value_text_size=10,
         ),
         table_panel(
             panel_id=5,
@@ -978,6 +998,7 @@ def leaderboard_dashboard() -> dict:
             y=0,
             w=8,
             h=5,
+            overrides=[fixed_color_override("Bearish", "red")],
         ),
         timeseries_panel(
             panel_id=9,
@@ -994,6 +1015,10 @@ def leaderboard_dashboard() -> dict:
             y=0,
             w=16,
             h=5,
+            overrides=[
+                fixed_color_override("Average", "#4EA1FF"),
+                fixed_color_override("Median", "#8AB8FF"),
+            ],
         ),
     ]
     return dashboard
