@@ -251,7 +251,11 @@ def refresh_analytics() -> None:
         return
 
     db_config = get_database_config()
-    analytics_result = refresh_analytics_snapshots(db_config, analytics_config.timeframes)
+    analytics_result = refresh_analytics_snapshots(
+        db_config,
+        analytics_config.timeframes,
+        batch_size=analytics_config.backfill_batch_dates,
+    )
     if analytics_result is None:
         return
     logger.info(

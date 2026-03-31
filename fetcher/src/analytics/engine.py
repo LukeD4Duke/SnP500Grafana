@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import math
+from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Iterable
@@ -11,12 +13,14 @@ import pandas as pd
 
 from ..config import DatabaseConfig
 from ..database import (
+    get_existing_signal_snapshot_dates,
     get_price_history_dataset,
-    get_prior_signal_scores,
     upsert_market_breadth_snapshots,
     upsert_rank_snapshots,
     upsert_signal_snapshots,
 )
+
+logger = logging.getLogger(__name__)
 
 TIMEFRAME_SETTINGS = {
     "daily": {
@@ -84,9 +88,11 @@ class AnalyticsRefreshResult:
 def refresh_analytics_snapshots(
     db_config: DatabaseConfig,
     timeframes: Iterable[str] | None = None,
+    batch_size: int = 50,
 ) -> AnalyticsRefreshResult | None:
-    """Rebuild latest analytics outputs from stored OHLCV history."""
+    """Backfill and extend analytics outputs from stored OHLCV history."""
     normalized_timeframes = _normalize_timeframes(timeframes)
+    normalized_batch_size = max(int(batch_size), 1)
     price_rows = get_price_history_dataset(db_config)
     if not price_rows:
         return None
@@ -102,40 +108,76 @@ def refresh_analytics_snapshots(
         return None
 
     snapshot_date = prices["timestamp"].max().date().isoformat()
-    breadth_reference = _build_daily_breadth_reference(prices)
-    prior_scores = pd.DataFrame(
-        get_prior_signal_scores(
-            db_config,
-            snapshot_date=snapshot_date,
-            timeframes=normalized_timeframes,
-            symbols=sorted(prices["symbol"].dropna().astype(str).unique()),
-        )
-    )
-    if not prior_scores.empty:
-        prior_scores["snapshot_date"] = pd.to_datetime(prior_scores["snapshot_date"]).dt.date
+    breadth_reference = _build_daily_breadth_history(prices)
 
-    signal_rows: list[dict] = []
-    rank_rows: list[dict] = []
-    breadth_rows: list[dict] = []
+    signal_row_count = 0
+    rank_row_count = 0
+    breadth_row_count = 0
 
     for timeframe in normalized_timeframes:
         metrics = _build_timeframe_metrics(prices, timeframe)
         if metrics.empty:
             continue
-        metrics = metrics.merge(breadth_reference, on="symbol", how="left")
-        signal_rows.extend(_build_signal_rows(metrics, timeframe, snapshot_date))
-        rank_rows.extend(_build_rank_rows(metrics, timeframe, snapshot_date, prior_scores))
-        breadth_rows.append(_build_breadth_row(metrics, timeframe, snapshot_date))
+        metrics = metrics.merge(breadth_reference, on=["symbol", "snapshot_date"], how="left")
+        expected_dates = set(metrics["snapshot_date"].astype(str))
+        existing_dates = set(get_existing_signal_snapshot_dates(db_config, timeframe))
+        missing_dates = sorted(expected_dates - existing_dates)
+        extra_dates = sorted(existing_dates - expected_dates)
+        if extra_dates:
+            logger.warning(
+                "Analytics timeframe %s has %d stored snapshot date(s) not produced by the current resampling logic: %s",
+                timeframe,
+                len(extra_dates),
+                _format_date_preview(extra_dates),
+            )
+        unexpected_missing_dates = sorted(expected_dates - existing_dates)
+        if unexpected_missing_dates:
+            logger.info(
+                "Analytics timeframe %s is missing %d expected snapshot date(s): %s",
+                timeframe,
+                len(unexpected_missing_dates),
+                _format_date_preview(unexpected_missing_dates),
+            )
+        if not missing_dates:
+            logger.info("Analytics timeframe %s already up to date; no missing snapshot dates", timeframe)
+            continue
 
-    upsert_signal_snapshots(db_config, signal_rows)
-    upsert_rank_snapshots(db_config, rank_rows)
-    upsert_market_breadth_snapshots(db_config, breadth_rows)
+        date_windows = list(_chunked_snapshot_dates(missing_dates, normalized_batch_size))
+        logger.info(
+            "Analytics timeframe %s has %d missing snapshot dates; processing in %d window(s) of up to %d date(s)",
+            timeframe,
+            len(missing_dates),
+            len(date_windows),
+            normalized_batch_size,
+        )
+        for window_index, window_dates in enumerate(date_windows, start=1):
+            signal_rows = _build_signal_rows(metrics, timeframe, window_dates)
+            rank_rows = _build_rank_rows(metrics, timeframe, window_dates)
+            breadth_rows = _build_breadth_rows(metrics, timeframe, window_dates)
+            upsert_signal_snapshots(db_config, signal_rows)
+            upsert_rank_snapshots(db_config, rank_rows)
+            upsert_market_breadth_snapshots(db_config, breadth_rows)
+            signal_row_count += len(signal_rows)
+            rank_row_count += len(rank_rows)
+            breadth_row_count += len(breadth_rows)
+            logger.info(
+                "Analytics timeframe %s window %d/%d wrote %d signal rows, %d rank rows, and %d breadth rows for %s to %s",
+                timeframe,
+                window_index,
+                len(date_windows),
+                len(signal_rows),
+                len(rank_rows),
+                len(breadth_rows),
+                window_dates[0],
+                window_dates[-1],
+            )
+
     return AnalyticsRefreshResult(
         snapshot_date=snapshot_date,
         timeframes=normalized_timeframes,
-        signal_rows=len(signal_rows),
-        rank_rows=len(rank_rows),
-        breadth_rows=len(breadth_rows),
+        signal_rows=signal_row_count,
+        rank_rows=rank_row_count,
+        breadth_rows=breadth_row_count,
     )
 
 
@@ -150,8 +192,24 @@ def _normalize_timeframes(timeframes: Iterable[str] | None) -> list[str]:
     return normalized or list(TIMEFRAME_SETTINGS.keys())
 
 
-def _build_daily_breadth_reference(prices: pd.DataFrame) -> pd.DataFrame:
-    records: list[dict] = []
+def _chunked_snapshot_dates(dates: list[str], batch_size: int) -> Iterable[list[str]]:
+    normalized_batch_size = max(batch_size, 1)
+    for index in range(0, len(dates), normalized_batch_size):
+        yield dates[index : index + normalized_batch_size]
+
+
+def _format_date_preview(dates: list[str], limit: int = 5) -> str:
+    if not dates:
+        return "none"
+    visible = dates[:limit]
+    suffix = ""
+    if len(dates) > len(visible):
+        suffix = f" ... (+{len(dates) - len(visible)} more)"
+    return ", ".join(visible) + suffix
+
+
+def _build_daily_breadth_history(prices: pd.DataFrame) -> pd.DataFrame:
+    records: list[pd.DataFrame] = []
     for symbol, symbol_frame in prices.groupby("symbol", sort=True):
         symbol_frame = symbol_frame.sort_values("timestamp")
         close = symbol_frame["close"].astype(float)
@@ -159,46 +217,54 @@ def _build_daily_breadth_reference(prices: pd.DataFrame) -> pd.DataFrame:
         low = symbol_frame["low"].astype(float)
         if close.empty:
             continue
-        ema20 = close.ewm(span=20, adjust=False).mean().iloc[-1]
-        ema50 = close.ewm(span=50, adjust=False).mean().iloc[-1]
-        ema200 = close.ewm(span=200, adjust=False).mean().iloc[-1]
-        high_20 = high.rolling(20, min_periods=5).max().iloc[-1]
-        low_20 = low.rolling(20, min_periods=5).min().iloc[-1]
-        high_252 = high.rolling(252, min_periods=20).max().iloc[-1]
-        low_252 = low.rolling(252, min_periods=20).min().iloc[-1]
-        latest_close = float(close.iloc[-1])
+        ema20 = close.ewm(span=20, adjust=False).mean()
+        ema50 = close.ewm(span=50, adjust=False).mean()
+        ema200 = close.ewm(span=200, adjust=False).mean()
+        high_20 = high.rolling(20, min_periods=5).max()
+        low_20 = low.rolling(20, min_periods=5).min()
+        high_252 = high.rolling(252, min_periods=20).max()
+        low_252 = low.rolling(252, min_periods=20).min()
         records.append(
-            {
-                "symbol": symbol,
-                "above_ema20": bool(pd.notna(ema20) and latest_close > float(ema20)),
-                "above_ema50": bool(pd.notna(ema50) and latest_close > float(ema50)),
-                "above_ema200": bool(pd.notna(ema200) and latest_close > float(ema200)),
-                "new_20d_high": bool(pd.notna(high_20) and latest_close >= float(high_20) * 0.995),
-                "new_20d_low": bool(pd.notna(low_20) and latest_close <= float(low_20) * 1.005),
-                "near_52w_high": bool(pd.notna(high_252) and latest_close >= float(high_252) * 0.98),
-                "near_52w_low": bool(pd.notna(low_252) and latest_close <= float(low_252) * 1.02),
-            }
+            pd.DataFrame(
+                {
+                    "symbol": symbol,
+                    "snapshot_date": pd.to_datetime(symbol_frame["timestamp"]).dt.date.astype(str),
+                    "above_ema20": close.gt(ema20.fillna(close)),
+                    "above_ema50": close.gt(ema50.fillna(close)),
+                    "above_ema200": close.gt(ema200.fillna(close)),
+                    "new_20d_high": close.ge(high_20.fillna(close) * 0.995),
+                    "new_20d_low": close.le(low_20.fillna(close) * 1.005),
+                    "near_52w_high": close.ge(high_252.fillna(close) * 0.98),
+                    "near_52w_low": close.le(low_252.fillna(close) * 1.02),
+                }
+            )
         )
-    return pd.DataFrame(records)
+    if not records:
+        return pd.DataFrame(columns=["symbol", "snapshot_date"])
+    return pd.concat(records, ignore_index=True)
 
 
 def _build_timeframe_metrics(prices: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     settings = TIMEFRAME_SETTINGS[timeframe]
-    records: list[dict] = []
+    records: list[pd.DataFrame] = []
     for symbol, symbol_frame in prices.groupby("symbol", sort=True):
         bars = _resample_symbol_frame(symbol_frame, timeframe)
         if bars.empty:
             continue
-        metrics = _compute_symbol_metrics(symbol, bars, settings)
-        if metrics is not None:
+        metrics = _compute_symbol_metric_history(symbol, bars, settings)
+        if metrics is not None and not metrics.empty:
             records.append(metrics)
     if not records:
         return pd.DataFrame()
 
-    metrics = pd.DataFrame(records)
-    metrics["relative_strength_score"] = metrics["momentum_return"].rank(pct=True).mul(100).round(2)
-    metrics["atr_percentile"] = metrics["atr_pct"].rank(pct=True).mul(100)
-    metrics["realized_vol_percentile"] = metrics["realized_vol"].rank(pct=True).mul(100)
+    metrics = pd.concat(records, ignore_index=True)
+    metrics["relative_strength_score"] = (
+        metrics.groupby("snapshot_date")["momentum_return"].rank(pct=True).mul(100).round(2)
+    )
+    metrics["atr_percentile"] = metrics.groupby("snapshot_date")["atr_pct"].rank(pct=True).mul(100)
+    metrics["realized_vol_percentile"] = (
+        metrics.groupby("snapshot_date")["realized_vol"].rank(pct=True).mul(100)
+    )
 
     stack_score = (
         metrics["ema_fast"].gt(metrics["ema_medium"]).astype(float) * 50
@@ -263,8 +329,7 @@ def _build_timeframe_metrics(prices: pd.DataFrame, timeframe: str) -> pd.DataFra
     metrics["regime_label"] = metrics.apply(_regime_label, axis=1)
     metrics["recommendation_label"] = metrics.apply(_recommendation_label, axis=1)
     metrics["drivers_json"] = metrics.apply(_build_drivers, axis=1)
-    metrics["snapshot_date"] = pd.to_datetime(metrics["last_timestamp"]).dt.date.astype(str)
-    return metrics
+    return metrics.sort_values(["snapshot_date", "symbol"]).reset_index(drop=True)
 
 
 def _resample_symbol_frame(symbol_frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
@@ -295,7 +360,7 @@ def _resample_symbol_frame(symbol_frame: pd.DataFrame, timeframe: str) -> pd.Dat
     return bars
 
 
-def _compute_symbol_metrics(symbol: str, bars: pd.DataFrame, settings: dict) -> dict | None:
+def _compute_symbol_metric_history(symbol: str, bars: pd.DataFrame, settings: dict) -> pd.DataFrame | None:
     bars = bars.sort_values("timestamp").copy()
     close = pd.to_numeric(bars["close"], errors="coerce")
     high = pd.to_numeric(bars["high"], errors="coerce")
@@ -305,91 +370,84 @@ def _compute_symbol_metrics(symbol: str, bars: pd.DataFrame, settings: dict) -> 
         return None
 
     min_required = max(settings["slow"] + settings["slope"], settings["breakout"] + 5)
-    latest_close = float(close.iloc[-1])
-    latest_high = float(high.iloc[-1]) if pd.notna(high.iloc[-1]) else latest_close
-    latest_low = float(low.iloc[-1]) if pd.notna(low.iloc[-1]) else latest_close
 
     ema_fast = close.ewm(span=settings["fast"], adjust=False).mean()
     ema_medium = close.ewm(span=settings["medium"], adjust=False).mean()
     ema_slow = close.ewm(span=settings["slow"], adjust=False).mean()
-    ema_medium_slope = 0.0
-    if len(ema_medium) > settings["slope"] and pd.notna(ema_medium.iloc[-settings["slope"] - 1]):
-        previous_medium = float(ema_medium.iloc[-settings["slope"] - 1])
-        if previous_medium:
-            ema_medium_slope = float(ema_medium.iloc[-1] / previous_medium - 1)
+    previous_medium = ema_medium.shift(settings["slope"])
+    ema_medium_slope = ((ema_medium / previous_medium) - 1).where(previous_medium.ne(0), 0.0).fillna(0.0)
 
-    rsi = _calculate_rsi(close, settings["rsi"]).iloc[-1]
-    atr = _calculate_atr(high, low, close, settings["atr"]).iloc[-1]
-    atr_pct = float(atr / latest_close) if pd.notna(atr) and latest_close else 0.0
-    realized_vol = float(close.pct_change().rolling(settings["volatility"], min_periods=3).std().iloc[-1] or 0.0)
-    volume_avg = float(volume.rolling(settings["volume"], min_periods=3).mean().iloc[-1] or 0.0)
-    volume_ratio = float(volume.iloc[-1] / volume_avg) if volume_avg else 1.0
-    momentum_return = float(close.pct_change(settings["momentum"]).iloc[-1] or 0.0)
-    macd_proxy = float((ema_fast.iloc[-1] - ema_medium.iloc[-1]) / latest_close) if latest_close else 0.0
-    recent_high = float(high.rolling(settings["breakout"], min_periods=5).max().iloc[-1] or latest_high)
-    recent_low = float(low.rolling(settings["breakout"], min_periods=5).min().iloc[-1] or latest_low)
+    rsi = _calculate_rsi(close, settings["rsi"]).fillna(50.0)
+    atr = _calculate_atr(high, low, close, settings["atr"])
+    atr_pct = (atr / close.replace(0, pd.NA)).fillna(0.0)
+    realized_vol = close.pct_change().rolling(settings["volatility"], min_periods=3).std().fillna(0.0)
+    volume_avg = volume.rolling(settings["volume"], min_periods=3).mean()
+    volume_ratio = (volume / volume_avg.replace(0, pd.NA)).fillna(1.0)
+    momentum_return = close.pct_change(settings["momentum"]).fillna(0.0)
+    macd_proxy = ((ema_fast - ema_medium) / close.replace(0, pd.NA)).fillna(0.0)
+    recent_high = high.rolling(settings["breakout"], min_periods=5).max().fillna(high)
+    recent_low = low.rolling(settings["breakout"], min_periods=5).min().fillna(low)
     range_span = recent_high - recent_low
-    range_position = 0.5 if range_span <= 0 else (latest_close - recent_low) / range_span
-    breakout_flag = recent_high > 0 and latest_close >= recent_high * 0.995
-    breakdown_flag = recent_low > 0 and latest_close <= recent_low * 1.005
-    stretch_pct = float(latest_close / ema_fast.iloc[-1] - 1) if pd.notna(ema_fast.iloc[-1]) and ema_fast.iloc[-1] else 0.0
-    overbought_flag = bool(pd.notna(rsi) and float(rsi) >= 70) or stretch_pct >= 0.10
-    oversold_flag = bool(pd.notna(rsi) and float(rsi) <= 30) or stretch_pct <= -0.10
+    range_position = ((close - recent_low) / range_span.where(range_span.gt(0), pd.NA)).fillna(0.5)
+    breakout_flag = recent_high.gt(0) & close.ge(recent_high * 0.995)
+    breakdown_flag = recent_low.gt(0) & close.le(recent_low * 1.005)
+    stretch_pct = ((close / ema_fast.replace(0, pd.NA)) - 1).fillna(0.0)
+    overbought_flag = rsi.ge(70) | stretch_pct.ge(0.10)
+    oversold_flag = rsi.le(30) | stretch_pct.le(-0.10)
 
-    swing_structure = 0
-    if len(high) >= 3 and len(low) >= 3:
-        if high.iloc[-1] > high.iloc[-2] > high.iloc[-3] and low.iloc[-1] > low.iloc[-2] > low.iloc[-3]:
-            swing_structure = 1
-        elif high.iloc[-1] < high.iloc[-2] < high.iloc[-3] and low.iloc[-1] < low.iloc[-2] < low.iloc[-3]:
-            swing_structure = -1
+    swing_structure = pd.Series(0, index=bars.index, dtype="int64")
+    higher_highs = high.gt(high.shift(1)) & high.shift(1).gt(high.shift(2))
+    higher_lows = low.gt(low.shift(1)) & low.shift(1).gt(low.shift(2))
+    lower_highs = high.lt(high.shift(1)) & high.shift(1).lt(high.shift(2))
+    lower_lows = low.lt(low.shift(1)) & low.shift(1).lt(low.shift(2))
+    swing_structure.loc[higher_highs & higher_lows] = 1
+    swing_structure.loc[lower_highs & lower_lows] = -1
 
-    signed_volume = close.diff().fillna(0).apply(lambda value: 1 if value > 0 else (-1 if value < 0 else 0))
-    volume_pressure = float(
-        (signed_volume * volume).rolling(settings["volume"], min_periods=3).sum().iloc[-1]
-        / max(volume.rolling(settings["volume"], min_periods=3).sum().iloc[-1], 1)
-    )
+    signed_volume = close.diff().fillna(0).map(lambda value: 1 if value > 0 else (-1 if value < 0 else 0))
+    rolling_volume = volume.rolling(settings["volume"], min_periods=3).sum()
+    volume_pressure = ((signed_volume * volume).rolling(settings["volume"], min_periods=3).sum() / rolling_volume.clip(lower=1)).fillna(0.0)
     previous_close = close.shift(1)
-    gap_risk = float(((close - previous_close).abs() / previous_close).rolling(5, min_periods=2).max().iloc[-1] or 0.0)
-    latest_timestamp = pd.Timestamp(bars["last_timestamp"].iloc[-1])
-    age_days = max((pd.Timestamp.utcnow() - latest_timestamp).days, 0)
-    trend_alignment_flag = bool(
-        pd.notna(ema_fast.iloc[-1])
-        and pd.notna(ema_medium.iloc[-1])
-        and pd.notna(ema_slow.iloc[-1])
-        and (
-            (ema_fast.iloc[-1] > ema_medium.iloc[-1] > ema_slow.iloc[-1])
-            or (ema_fast.iloc[-1] < ema_medium.iloc[-1] < ema_slow.iloc[-1])
-        )
+    gap_risk = (((close - previous_close).abs() / previous_close.replace(0, pd.NA)).rolling(5, min_periods=2).max()).fillna(0.0)
+    trend_alignment_flag = (
+        ema_fast.notna()
+        & ema_medium.notna()
+        & ema_slow.notna()
+        & ((ema_fast.gt(ema_medium) & ema_medium.gt(ema_slow)) | (ema_fast.lt(ema_medium) & ema_medium.lt(ema_slow)))
     )
-    data_quality_flag = bool(len(bars) < min_required or age_days > settings["stale_days"])
+    bar_counts = pd.Series(range(1, len(bars) + 1), index=bars.index)
+    data_quality_flag = bar_counts.lt(min_required)
 
-    return {
-        "symbol": symbol,
-        "last_timestamp": latest_timestamp.isoformat(),
-        "close": latest_close,
-        "volume": int(volume.iloc[-1]) if pd.notna(volume.iloc[-1]) else 0,
-        "ema_fast": float(ema_fast.iloc[-1]) if pd.notna(ema_fast.iloc[-1]) else latest_close,
-        "ema_medium": float(ema_medium.iloc[-1]) if pd.notna(ema_medium.iloc[-1]) else latest_close,
-        "ema_slow": float(ema_slow.iloc[-1]) if pd.notna(ema_slow.iloc[-1]) else latest_close,
-        "ema_medium_slope": ema_medium_slope,
-        "rsi": float(rsi) if pd.notna(rsi) else 50.0,
-        "atr_pct": atr_pct,
-        "realized_vol": realized_vol,
-        "volume_ratio": volume_ratio,
-        "momentum_return": momentum_return,
-        "macd_proxy": macd_proxy,
-        "range_position": float(range_position),
-        "breakout_flag": bool(breakout_flag),
-        "breakdown_flag": bool(breakdown_flag),
-        "stretch_pct": stretch_pct,
-        "overbought_flag": bool(overbought_flag),
-        "oversold_flag": bool(oversold_flag),
-        "swing_structure": swing_structure,
-        "volume_pressure": volume_pressure,
-        "gap_risk": gap_risk,
-        "trend_alignment_flag": trend_alignment_flag,
-        "data_quality_flag": data_quality_flag,
-    }
+    metrics = pd.DataFrame(
+        {
+            "symbol": symbol,
+            "last_timestamp": pd.to_datetime(bars["last_timestamp"], utc=True).map(lambda value: value.isoformat()),
+            "snapshot_date": pd.to_datetime(bars["last_timestamp"], utc=True).dt.date.astype(str),
+            "close": close.astype(float),
+            "volume": volume.fillna(0).astype(int),
+            "ema_fast": ema_fast.fillna(close).astype(float),
+            "ema_medium": ema_medium.fillna(close).astype(float),
+            "ema_slow": ema_slow.fillna(close).astype(float),
+            "ema_medium_slope": ema_medium_slope.astype(float),
+            "rsi": rsi.astype(float),
+            "atr_pct": atr_pct.astype(float),
+            "realized_vol": realized_vol.astype(float),
+            "volume_ratio": volume_ratio.astype(float),
+            "momentum_return": momentum_return.astype(float),
+            "macd_proxy": macd_proxy.astype(float),
+            "range_position": range_position.astype(float),
+            "breakout_flag": breakout_flag.astype(bool),
+            "breakdown_flag": breakdown_flag.astype(bool),
+            "stretch_pct": stretch_pct.astype(float),
+            "overbought_flag": overbought_flag.astype(bool),
+            "oversold_flag": oversold_flag.astype(bool),
+            "swing_structure": swing_structure.astype(int),
+            "volume_pressure": volume_pressure.astype(float),
+            "gap_risk": gap_risk.astype(float),
+            "trend_alignment_flag": trend_alignment_flag.astype(bool),
+            "data_quality_flag": data_quality_flag.astype(bool),
+        }
+    )
+    return metrics
 
 
 def _calculate_rsi(series: pd.Series, period: int) -> pd.Series:
@@ -493,12 +551,13 @@ def _finite_or_none(value: object) -> float | None:
     return round(numeric, 2)
 
 
-def _build_signal_rows(metrics: pd.DataFrame, timeframe: str, snapshot_date: str) -> list[dict]:
+def _build_signal_rows(metrics: pd.DataFrame, timeframe: str, missing_dates: list[str]) -> list[dict]:
     rows: list[dict] = []
-    for _, row in metrics.iterrows():
+    date_filter = set(missing_dates)
+    for _, row in metrics.loc[metrics["snapshot_date"].isin(date_filter)].iterrows():
         rows.append(
             {
-                "snapshot_date": snapshot_date,
+                "snapshot_date": row["snapshot_date"],
                 "symbol": row["symbol"],
                 "timeframe": timeframe,
                 "last_timestamp": row["last_timestamp"],
@@ -536,83 +595,102 @@ def _build_signal_rows(metrics: pd.DataFrame, timeframe: str, snapshot_date: str
 def _build_rank_rows(
     metrics: pd.DataFrame,
     timeframe: str,
-    snapshot_date: str,
-    prior_scores: pd.DataFrame,
+    missing_dates: list[str],
 ) -> list[dict]:
-    ranked = metrics.sort_values(["final_score", "symbol"], ascending=[False, True]).copy()
-    ranked["bull_rank"] = range(1, len(ranked) + 1)
-    ranked = ranked.sort_values(["final_score", "symbol"], ascending=[True, True]).copy()
-    ranked["bear_rank"] = range(1, len(ranked) + 1)
-    ranked = ranked.sort_values("symbol").copy()
-    prior_lookup = _build_prior_score_lookup(prior_scores, timeframe, snapshot_date)
-
     rows: list[dict] = []
-    for _, row in ranked.iterrows():
-        previous_1w = prior_lookup.get((row["symbol"], 7))
-        previous_1m = prior_lookup.get((row["symbol"], 30))
-        final_score = float(row["final_score"])
-        bull_rank = int(row["bull_rank"])
-        bear_rank = int(row["bear_rank"])
+    if metrics.empty:
+        return rows
+
+    missing_date_set = set(missing_dates)
+    prior_lookup = _build_prior_score_lookup(metrics)
+    for snapshot_date, date_metrics in metrics.groupby("snapshot_date", sort=True):
+        if snapshot_date not in missing_date_set:
+            continue
+        bullish = date_metrics.sort_values(["final_score", "symbol"], ascending=[False, True]).copy()
+        bullish["bull_rank"] = range(1, len(bullish) + 1)
+        bearish = date_metrics.sort_values(["final_score", "symbol"], ascending=[True, True]).copy()
+        bearish["bear_rank"] = range(1, len(bearish) + 1)
+        ranked = bullish.merge(
+            bearish[["symbol", "bear_rank"]],
+            on="symbol",
+            how="left",
+        ).sort_values("symbol")
+
+        for _, row in ranked.iterrows():
+            previous_1w = prior_lookup.get((row["symbol"], snapshot_date, 7))
+            previous_1m = prior_lookup.get((row["symbol"], snapshot_date, 30))
+            final_score = float(row["final_score"])
+            bull_rank = int(row["bull_rank"])
+            bear_rank = int(row["bear_rank"])
+            rows.append(
+                {
+                    "snapshot_date": snapshot_date,
+                    "timeframe": timeframe,
+                    "symbol": row["symbol"],
+                    "final_score": round(final_score, 4),
+                    "bull_rank": bull_rank,
+                    "bear_rank": bear_rank,
+                    "regime_label": row["regime_label"],
+                    "recommendation_label": row["recommendation_label"],
+                    "score_change_1w": None if previous_1w is None else round(final_score - previous_1w, 4),
+                    "score_change_1m": None if previous_1m is None else round(final_score - previous_1m, 4),
+                    "in_top20_bull": bull_rank <= 20,
+                    "in_top20_bear": bear_rank <= 20,
+                }
+            )
+    return rows
+
+
+def _build_prior_score_lookup(metrics: pd.DataFrame) -> dict[tuple[str, str, int], float]:
+    lookup: dict[tuple[str, str, int], float] = {}
+    if metrics.empty:
+        return lookup
+
+    for symbol, symbol_rows in metrics.groupby("symbol", sort=True):
+        ordered = symbol_rows.sort_values("snapshot_date")
+        dates = [date.fromisoformat(str(value)) for value in ordered["snapshot_date"]]
+        scores = [float(value) for value in ordered["final_score"]]
+        ordinals = [value.toordinal() for value in dates]
+        for current_date in dates:
+            for delta_days in (7, 30):
+                target_ordinal = (current_date - timedelta(days=delta_days)).toordinal()
+                index = bisect_right(ordinals, target_ordinal) - 1
+                if index >= 0:
+                    lookup[(str(symbol), current_date.isoformat(), delta_days)] = scores[index]
+    return lookup
+
+
+def _build_breadth_rows(metrics: pd.DataFrame, timeframe: str, missing_dates: list[str]) -> list[dict]:
+    rows: list[dict] = []
+    missing_date_set = set(missing_dates)
+    for snapshot_date, date_metrics in metrics.groupby("snapshot_date", sort=True):
+        if snapshot_date not in missing_date_set:
+            continue
+        total = len(date_metrics)
+        bullish_count = int(date_metrics["final_score"].ge(65).sum())
+        bearish_count = int(date_metrics["final_score"].le(35).sum())
+        neutral_count = max(total - bullish_count - bearish_count, 0)
+        median_score = float(date_metrics["final_score"].median()) if total else 0.0
         rows.append(
             {
                 "snapshot_date": snapshot_date,
                 "timeframe": timeframe,
-                "symbol": row["symbol"],
-                "final_score": round(final_score, 4),
-                "bull_rank": bull_rank,
-                "bear_rank": bear_rank,
-                "regime_label": row["regime_label"],
-                "recommendation_label": row["recommendation_label"],
-                "score_change_1w": None if previous_1w is None else round(final_score - previous_1w, 4),
-                "score_change_1m": None if previous_1m is None else round(final_score - previous_1m, 4),
-                "in_top20_bull": bull_rank <= 20,
-                "in_top20_bear": bear_rank <= 20,
+                "universe_size": total,
+                "bullish_count": bullish_count,
+                "neutral_count": neutral_count,
+                "bearish_count": bearish_count,
+                "pct_above_ema20": _boolean_pct(date_metrics.get("above_ema20")),
+                "pct_above_ema50": _boolean_pct(date_metrics.get("above_ema50")),
+                "pct_above_ema200": _boolean_pct(date_metrics.get("above_ema200")),
+                "pct_new_20d_high": _boolean_pct(date_metrics.get("new_20d_high")),
+                "pct_new_20d_low": _boolean_pct(date_metrics.get("new_20d_low")),
+                "pct_near_52w_high": _boolean_pct(date_metrics.get("near_52w_high")),
+                "pct_near_52w_low": _boolean_pct(date_metrics.get("near_52w_low")),
+                "avg_final_score": round(float(date_metrics["final_score"].mean()) if total else 0.0, 4),
+                "median_final_score": round(median_score, 4),
             }
         )
     return rows
-
-
-def _build_prior_score_lookup(prior_scores: pd.DataFrame, timeframe: str, snapshot_date: str) -> dict[tuple[str, int], float]:
-    if prior_scores.empty:
-        return {}
-    current_date = date.fromisoformat(snapshot_date)
-    timeframe_rows = prior_scores.loc[prior_scores["timeframe"] == timeframe].copy()
-    if timeframe_rows.empty:
-        return {}
-    lookup: dict[tuple[str, int], float] = {}
-    for symbol, symbol_rows in timeframe_rows.groupby("symbol", sort=True):
-        symbol_rows = symbol_rows.sort_values("snapshot_date")
-        for delta_days in (7, 30):
-            target_date = current_date - timedelta(days=delta_days)
-            eligible = symbol_rows.loc[symbol_rows["snapshot_date"] <= target_date]
-            if not eligible.empty:
-                lookup[(str(symbol), delta_days)] = float(eligible.iloc[-1]["final_score"])
-    return lookup
-
-
-def _build_breadth_row(metrics: pd.DataFrame, timeframe: str, snapshot_date: str) -> dict:
-    total = len(metrics)
-    bullish_count = int(metrics["final_score"].ge(65).sum())
-    bearish_count = int(metrics["final_score"].le(35).sum())
-    neutral_count = max(total - bullish_count - bearish_count, 0)
-    median_score = float(metrics["final_score"].median()) if total else 0.0
-    return {
-        "snapshot_date": snapshot_date,
-        "timeframe": timeframe,
-        "universe_size": total,
-        "bullish_count": bullish_count,
-        "neutral_count": neutral_count,
-        "bearish_count": bearish_count,
-        "pct_above_ema20": _boolean_pct(metrics.get("above_ema20")),
-        "pct_above_ema50": _boolean_pct(metrics.get("above_ema50")),
-        "pct_above_ema200": _boolean_pct(metrics.get("above_ema200")),
-        "pct_new_20d_high": _boolean_pct(metrics.get("new_20d_high")),
-        "pct_new_20d_low": _boolean_pct(metrics.get("new_20d_low")),
-        "pct_near_52w_high": _boolean_pct(metrics.get("near_52w_high")),
-        "pct_near_52w_low": _boolean_pct(metrics.get("near_52w_low")),
-        "avg_final_score": round(float(metrics["final_score"].mean()) if total else 0.0, 4),
-        "median_final_score": round(median_score, 4),
-    }
 
 
 def _boolean_pct(series: pd.Series | None) -> float:

@@ -97,6 +97,8 @@ The fetcher now materializes additive analytics tables after OHLCV and indicator
 
 The analytics layer produces machine-readable block scores for trend, momentum, volume, relative strength, structure, mean reversion, and risk. Those snapshots drive both Grafana and the report generator.
 
+Analytics snapshot refreshes now backfill any missing historical snapshot dates from the full stored OHLCV range and only append newly missing dates on later runs. That means ticker score history can cover the full database period without manually clearing and rebuilding the analytics tables. Historical backfills are written in snapshot-date windows controlled by `ANALYTICS_BACKFILL_BATCH_DATES`, which reduces transaction size and makes progress visible in `stock-fetcher` logs during long rebuilds.
+
 Weekly and monthly reports are generated as Markdown and HTML under `reports/` by default. The fetcher also stores report metadata and summary rows in `report_snapshots` so Grafana can surface the latest report output alongside rankings.
 
 For manual exports, the stack now includes a dedicated report UI at `REPORT_UI_PUBLIC_URL`. The Grafana launch panel opens that page, which generates a downloadable HTML report and PDF using Grafana-rendered panel images plus dashboard-by-dashboard explanations.
@@ -159,6 +161,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `INDICATOR_BATCH_SIZE` | `25` | Number of symbols processed per indicator refresh batch |
 | `ANALYTICS_ENABLED` | `true` | Enable additive analytics snapshot refresh after price and indicator updates |
 | `ANALYTICS_TIMEFRAMES` | `daily,weekly,monthly` | Comma-separated analytics snapshot cadences to materialize |
+| `ANALYTICS_BACKFILL_BATCH_DATES` | `50` | Maximum number of missing snapshot dates written per analytics backfill window within each timeframe |
 | `REPORTS_ENABLED` | `true` | Enable deterministic weekly and monthly report generation |
 | `REPORT_OUTPUT_DIR` | `/app/reports` | In-container output path for generated Markdown and HTML reports |
 | `REPORT_WEEKLY_CRON` | `15 0 * * 1` | Cron schedule for the weekly report job |

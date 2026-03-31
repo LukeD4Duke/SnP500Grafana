@@ -60,6 +60,7 @@ class AnalyticsConfig:
 
     enabled: bool
     timeframes: list[str]
+    backfill_batch_dates: int
 
 
 @dataclass
@@ -149,6 +150,7 @@ def get_analytics_config() -> AnalyticsConfig:
     return AnalyticsConfig(
         enabled=_get_bool_env("ANALYTICS_ENABLED", True),
         timeframes=timeframes,
+        backfill_batch_dates=max(1, int(os.environ.get("ANALYTICS_BACKFILL_BATCH_DATES", "50"))),
     )
 
 

@@ -1604,6 +1604,24 @@ def get_latest_signal_snapshot_date(config: DatabaseConfig, timeframe: Optional[
             return str(row[0]) if row and row[0] else None
 
 
+def get_existing_signal_snapshot_dates(
+    config: DatabaseConfig,
+    timeframe: str,
+) -> list[str]:
+    """Return all persisted signal snapshot dates for a timeframe."""
+    query = """
+        SELECT snapshot_date
+        FROM signal_snapshots
+        WHERE timeframe = %s
+        ORDER BY snapshot_date
+    """
+    with get_connection(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (timeframe,))
+            rows = cur.fetchall()
+            return [str(row[0]) for row in rows if row and row[0]]
+
+
 def get_signal_snapshots(
     config: DatabaseConfig,
     snapshot_date: str,
