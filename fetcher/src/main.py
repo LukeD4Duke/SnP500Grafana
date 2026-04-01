@@ -46,6 +46,7 @@ from .fetcher import (
 )
 from .indicators import calculate_indicators, indicators_available
 from .reporting import generate_report_artifacts
+from .status_server import FetcherStatusStore, start_status_server
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,7 +56,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 INCREMENTAL_LOOKBACK_BUFFER_ROWS = 50
 STARTUP_CATCHUP_JOB_ID = "startup_post_sync_catchup"
+STARTUP_BACKFILL_JOB_ID = "startup_backfill"
 PIPELINE_LOCK = Lock()
+STATUS_STORE = FetcherStatusStore()
 
 
 def _chunked(items: list[str], size: int) -> Iterable[list[str]]:
@@ -238,9 +241,18 @@ def _log_fetch_summary(result: FetchResult, failed_symbol_log_limit: int) -> Non
 def run_scheduled_sync() -> None:
     """Run the scheduled OHLCV sync followed by indicator refresh."""
     with PIPELINE_LOCK:
+        STATUS_STORE.update(
+            phase="scheduled_sync",
+            last_message="Running scheduled incremental sync",
+        )
         logger.info("Starting scheduled sync pipeline")
         result = run_sync(full_historical=False)
         run_post_sync_tasks(result.changed_symbols, price_frame=result.dataframe)
+        STATUS_STORE.update(
+            phase="idle",
+            ready=True,
+            last_message="Scheduled sync completed",
+        )
 
 
 def refresh_analytics() -> None:
@@ -329,6 +341,10 @@ def run_startup_post_sync_catchup(
 ) -> None:
     """Run populated-DB startup catch-up work outside the blocking startup path."""
     with PIPELINE_LOCK:
+        STATUS_STORE.update(
+            phase="startup_catchup",
+            last_message="Running startup post-sync catch-up",
+        )
         logger.info(
             "Running startup post-sync catch-up for %d symbols",
             len(set(symbols)),
@@ -337,6 +353,62 @@ def run_startup_post_sync_catchup(
             symbols,
             price_frame=price_frame,
             force_rebuild=force_rebuild,
+        )
+        STATUS_STORE.update(
+            phase="idle",
+            ready=True,
+            last_message="Startup post-sync catch-up completed",
+        )
+
+
+def run_startup_backfill(start_date: str, end_date: str) -> None:
+    """Run optional older-history startup backfill outside the blocking startup path."""
+    with PIPELINE_LOCK:
+        STATUS_STORE.update(
+            phase="startup_backfill",
+            ready=True,
+            startup_backfill_running=True,
+            startup_backfill_scheduled=False,
+            startup_backfill_range={"start": start_date, "end": end_date},
+            last_message=f"Running background startup backfill from {start_date} to {end_date}",
+        )
+        logger.info(
+            "Running background startup backfill from %s up to %s",
+            start_date,
+            end_date,
+        )
+        backfill_result = run_sync(
+            full_historical=True,
+            start_override=start_date,
+            end_override=end_date,
+            mode_label="Running startup backfill",
+        )
+        run_post_sync_tasks(
+            backfill_result.changed_symbols,
+            price_frame=backfill_result.dataframe,
+            force_rebuild=True,
+        )
+        min_price_date, max_price_date = get_price_date_bounds(get_database_config())
+        STATUS_STORE.update(
+            phase="idle",
+            ready=True,
+            startup_backfill_running=False,
+            startup_backfill_completed=True,
+            last_backfill_sync={
+                "start": start_date,
+                "end": end_date,
+                "requested_symbols": len(backfill_result.requested_symbols),
+                "successful_symbols": len(backfill_result.successful_symbols),
+                "failed_symbols": len(backfill_result.failed_symbols),
+                "changed_symbols": len(backfill_result.changed_symbols),
+                "upserted_row_count": backfill_result.upserted_row_count,
+            },
+            last_message=f"Background startup backfill completed; price range is {min_price_date or 'n/a'} to {max_price_date or 'n/a'}",
+        )
+        logger.info(
+            "Price data range after background backfill: %s to %s",
+            min_price_date or "n/a",
+            max_price_date or "n/a",
         )
 
 
@@ -438,11 +510,36 @@ def run_sync(
             "Refreshing downstream work will use %d changed symbols",
             len(upsert_result.changed_symbols),
         )
-    return replace(
+    result = replace(
         fetch_result,
         changed_symbols=upsert_result.changed_symbols,
         upserted_row_count=upsert_result.affected_row_count,
     )
+    if full_historical or start_override:
+        STATUS_STORE.update(
+            last_backfill_sync={
+                "start": start,
+                "end": end,
+                "requested_symbols": len(result.requested_symbols),
+                "successful_symbols": len(result.successful_symbols),
+                "failed_symbols": len(result.failed_symbols),
+                "changed_symbols": len(result.changed_symbols),
+                "upserted_row_count": result.upserted_row_count,
+            }
+        )
+    else:
+        STATUS_STORE.update(
+            last_incremental_sync={
+                "start": start,
+                "end": end,
+                "requested_symbols": len(result.requested_symbols),
+                "successful_symbols": len(result.successful_symbols),
+                "failed_symbols": len(result.failed_symbols),
+                "changed_symbols": len(result.changed_symbols),
+                "upserted_row_count": result.upserted_row_count,
+            }
+        )
+    return result
 
 
 def main() -> None:
@@ -452,8 +549,21 @@ def main() -> None:
     indicator_config = get_indicator_config()
     reporting_config = get_reporting_config()
     scheduler = BlockingScheduler()
+    start_status_server(STATUS_STORE, fetcher_config.status_port)
+    STATUS_STORE.update(
+        phase="starting",
+        ready=False,
+        startup_mode=fetcher_config.startup_post_sync_mode,
+        startup_backfill_mode=fetcher_config.startup_backfill_mode,
+        last_message="Starting fetcher bootstrap",
+    )
 
     if not wait_for_db(db_config):
+        STATUS_STORE.update(
+            phase="error",
+            ready=False,
+            last_message="Database not available after max retries",
+        )
         logger.error("Database not available after max retries. Exiting.")
         sys.exit(1)
 
@@ -467,7 +577,13 @@ def main() -> None:
         logger.info("Normalized %d persisted stock split rows from NaN to 0", normalized_split_rows)
 
     startup_catchup_kwargs: dict[str, object] | None = None
+    startup_backfill_kwargs: dict[str, str] | None = None
     if has_stock_price_data(db_config):
+        STATUS_STORE.update(
+            phase="startup_incremental_sync",
+            ready=False,
+            last_message="Running startup incremental sync",
+        )
         logger.info("Existing stock price data found, running startup incremental sync")
         startup_result = run_sync(full_historical=False)
         if fetcher_config.startup_post_sync_mode == "blocking":
@@ -496,29 +612,57 @@ def main() -> None:
 
         backfill_start = fetcher_config.backfill_start
         if backfill_start and min_price_date and backfill_start < min_price_date:
-            logger.info(
-                "Backfill requested; filling older history from %s up to existing earliest date %s",
-                backfill_start,
-                min_price_date,
+            STATUS_STORE.update(
+                startup_backfill_requested=True,
+                startup_backfill_range={"start": backfill_start, "end": min_price_date},
             )
-            backfill_result = run_sync(
-                full_historical=True,
-                start_override=backfill_start,
-                end_override=min_price_date,
-                mode_label="Running startup backfill",
-            )
-            run_post_sync_tasks(
-                backfill_result.changed_symbols,
-                price_frame=backfill_result.dataframe,
-                force_rebuild=True,
-            )
-            startup_catchup_kwargs = None
-            min_price_date, max_price_date = get_price_date_bounds(db_config)
-            logger.info(
-                "Price data range after backfill: %s to %s",
-                min_price_date or "n/a",
-                max_price_date or "n/a",
-            )
+            if fetcher_config.startup_backfill_mode == "blocking":
+                STATUS_STORE.update(
+                    phase="startup_backfill",
+                    ready=False,
+                    startup_backfill_running=True,
+                    last_message=f"Running blocking startup backfill from {backfill_start} to {min_price_date}",
+                )
+                logger.info(
+                    "Backfill requested; filling older history from %s up to existing earliest date %s "
+                    "(STARTUP_BACKFILL_MODE=blocking)",
+                    backfill_start,
+                    min_price_date,
+                )
+                backfill_result = run_sync(
+                    full_historical=True,
+                    start_override=backfill_start,
+                    end_override=min_price_date,
+                    mode_label="Running startup backfill",
+                )
+                run_post_sync_tasks(
+                    backfill_result.changed_symbols,
+                    price_frame=backfill_result.dataframe,
+                    force_rebuild=True,
+                )
+                startup_catchup_kwargs = None
+                min_price_date, max_price_date = get_price_date_bounds(db_config)
+                STATUS_STORE.update(
+                    startup_backfill_running=False,
+                    startup_backfill_completed=True,
+                    last_message=f"Blocking startup backfill completed; price range is {min_price_date or 'n/a'} to {max_price_date or 'n/a'}",
+                )
+                logger.info(
+                    "Price data range after backfill: %s to %s",
+                    min_price_date or "n/a",
+                    max_price_date or "n/a",
+                )
+            else:
+                logger.info(
+                    "Backfill requested; deferring older-history load from %s up to existing earliest date %s "
+                    "to a background job (STARTUP_BACKFILL_MODE=background)",
+                    backfill_start,
+                    min_price_date,
+                )
+                startup_backfill_kwargs = {
+                    "start_date": backfill_start,
+                    "end_date": min_price_date,
+                }
         elif backfill_start:
             logger.info(
                 "BACKFILL_START=%s already covered by existing earliest date %s; skipping startup backfill",
@@ -526,6 +670,11 @@ def main() -> None:
                 min_price_date or "n/a",
             )
     else:
+        STATUS_STORE.update(
+            phase="initial_full_sync",
+            ready=False,
+            last_message="Running initial full historical load",
+        )
         logger.info("No stock price data found, running initial historical load (this may take 15-30 minutes)")
         full_result = run_sync(full_historical=True)
         run_post_sync_tasks(
@@ -572,6 +721,30 @@ def main() -> None:
             "Scheduled startup post-sync catch-up for %s",
             run_date.isoformat(),
         )
+    if startup_backfill_kwargs is not None:
+        STATUS_STORE.update(
+            startup_backfill_scheduled=True,
+            last_message="Startup backfill scheduled to run in background",
+        )
+        run_date = datetime.now(timezone.utc) + timedelta(seconds=5)
+        scheduler.add_job(
+            run_startup_backfill,
+            DateTrigger(run_date=run_date),
+            kwargs=startup_backfill_kwargs,
+            id=STARTUP_BACKFILL_JOB_ID,
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info(
+            "Scheduled startup backfill for %s",
+            run_date.isoformat(),
+        )
+    STATUS_STORE.update(
+        phase="idle",
+        ready=True,
+        scheduler_started=True,
+        last_message="Fetcher startup completed; scheduler is running",
+    )
     scheduler.start()
 
 

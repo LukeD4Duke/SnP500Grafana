@@ -236,13 +236,17 @@ def _recover_symbol_batch(
     context_label: str,
 ) -> tuple[pd.DataFrame, set[str]]:
     """Retry a reduced symbol batch with symbol-level retry logic."""
-    total_attempts = max(config.symbol_retry_count + 1, 1)
-    for attempt in range(total_attempts):
+    total_exception_attempts = max(config.symbol_retry_count + 1, 1)
+    total_empty_attempts = max(config.empty_response_retry_count + 1, 1)
+    exception_attempt = 0
+    empty_attempt = 0
+
+    while True:
         try:
             df = _fetch_chunk(tickers, start, end)
         except Exception as exc:
-            attempt_num = attempt + 1
-            if attempt_num >= total_attempts:
+            attempt_num = exception_attempt + 1
+            if attempt_num >= total_exception_attempts:
                 logger.warning(
                     "%s exhausted symbol retries for [%s]: %s",
                     context_label,
@@ -250,16 +254,17 @@ def _recover_symbol_batch(
                     str(exc),
                 )
                 return pd.DataFrame(), set()
-            wait = config.retry_delay_seconds * (2 ** attempt)
+            wait = config.retry_delay_seconds * (2 ** exception_attempt)
             logger.warning(
                 "%s retry %d/%d in %.0fs for symbols [%s]: %s",
                 context_label,
                 attempt_num,
-                total_attempts,
+                total_exception_attempts,
                 wait,
                 ", ".join(tickers),
                 str(exc),
             )
+            exception_attempt += 1
             time.sleep(wait)
             continue
 
@@ -267,22 +272,28 @@ def _recover_symbol_batch(
         if successful_symbols:
             return df, successful_symbols
 
-        attempt_num = attempt + 1
-        if attempt_num >= total_attempts:
-            logger.warning("%s returned no rows for symbols [%s]", context_label, ", ".join(tickers))
+        attempt_num = empty_attempt + 1
+        if attempt_num >= total_empty_attempts:
+            if total_empty_attempts == 1:
+                logger.info(
+                    "%s returned no rows for symbols [%s]; skipping empty-response retries",
+                    context_label,
+                    ", ".join(tickers),
+                )
+            else:
+                logger.warning("%s returned no rows for symbols [%s]", context_label, ", ".join(tickers))
             return pd.DataFrame(), set()
-        wait = config.retry_delay_seconds * (2 ** attempt)
+        wait = config.retry_delay_seconds * (2 ** empty_attempt)
         logger.warning(
             "%s returned no rows, retry %d/%d in %.0fs for symbols [%s]",
             context_label,
             attempt_num,
-            total_attempts,
+            total_empty_attempts,
             wait,
             ", ".join(tickers),
         )
+        empty_attempt += 1
         time.sleep(wait)
-
-    return pd.DataFrame(), set()
 
 
 def _recover_missing_symbols(
@@ -358,6 +369,7 @@ def fetch_historical_data(
     config = config or FetcherConfig(
         chunk_size=50,
         symbol_retry_count=2,
+        empty_response_retry_count=0,
         recovery_chunk_size=5,
         failed_symbol_log_limit=20,
         delay_seconds=2.5,

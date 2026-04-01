@@ -38,9 +38,12 @@ class FetcherConfig:
     max_retries: int
     retry_delay_seconds: float
     symbol_retry_count: int = 2
+    empty_response_retry_count: int = 0
     recovery_chunk_size: int = 5
     failed_symbol_log_limit: int = 20
     startup_post_sync_mode: str = "background"
+    startup_backfill_mode: str = "background"
+    status_port: int = 8080
     backfill_start: Optional[str] = None
 
 
@@ -107,15 +110,24 @@ def get_fetcher_config() -> FetcherConfig:
             "STARTUP_POST_SYNC_MODE must be either 'background' or 'blocking'. "
             f"Received: {startup_post_sync_mode!r}"
         )
+    startup_backfill_mode = os.environ.get("STARTUP_BACKFILL_MODE", "background").strip().lower()
+    if startup_backfill_mode not in {"background", "blocking"}:
+        raise ValueError(
+            "STARTUP_BACKFILL_MODE must be either 'background' or 'blocking'. "
+            f"Received: {startup_backfill_mode!r}"
+        )
 
     return FetcherConfig(
         chunk_size=int(os.environ.get("YFINANCE_CHUNK_SIZE", "50")),
         symbol_retry_count=int(os.environ.get("YFINANCE_SYMBOL_RETRIES", "2")),
+        empty_response_retry_count=int(os.environ.get("YFINANCE_EMPTY_RESPONSE_RETRIES", "0")),
         recovery_chunk_size=int(os.environ.get("YFINANCE_RECOVERY_CHUNK_SIZE", "5")),
         failed_symbol_log_limit=int(os.environ.get("YFINANCE_FAILED_SYMBOL_LOG_LIMIT", "20")),
         delay_seconds=float(os.environ.get("YFINANCE_DELAY_SEC", "2.5")),
         historical_start=os.environ.get("HISTORICAL_START", "2020-01-01"),
         startup_post_sync_mode=startup_post_sync_mode,
+        startup_backfill_mode=startup_backfill_mode,
+        status_port=int(os.environ.get("FETCHER_STATUS_PORT", "8080")),
         backfill_start=os.environ.get("BACKFILL_START") or None,
         update_cron=os.environ.get("UPDATE_CRON", "0 23 * * *"),
         max_retries=int(os.environ.get("YFINANCE_MAX_RETRIES", "5")),

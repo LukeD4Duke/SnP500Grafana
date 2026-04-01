@@ -53,7 +53,12 @@
 
    On restarts against an already-populated database, the fetcher now becomes ready after schema init and the startup incremental OHLCV sync. Indicator refresh, analytics refresh, and report generation continue in a background catch-up job by default. Set `STARTUP_POST_SYNC_MODE=blocking` to restore the legacy behavior and keep startup blocked until those post-sync tasks finish.
 
-   For an older-history backfill on a populated database, set `BACKFILL_START` and restart the stack. The fetcher will still run its normal startup incremental sync first, then fetch older data from `BACKFILL_START` up to the earliest date already in `stock_prices`.
+   For an older-history backfill on a populated database, set `BACKFILL_START` and restart the stack. The fetcher will still run its normal startup incremental sync first, then fetch older data from `BACKFILL_START` up to the earliest date already in `stock_prices`. By default that older-history backfill is now scheduled as a background startup job so the service can become ready first. Set `STARTUP_BACKFILL_MODE=blocking` to restore the legacy blocking behavior.
+
+   The fetcher now also serves internal status endpoints on `FETCHER_STATUS_PORT` inside the container:
+   - `/healthz` returns liveness
+   - `/readyz` returns readiness and is used by the Docker healthcheck
+   - `/status` returns a JSON summary of the current phase, scheduler state, last sync summary, and startup backfill state
 
 6. Open Grafana at `http://localhost:3001`, log in with the admin credentials, and open the dashboards under **Dashboards > S&P 500**. On the `S&P 500 Leaderboards` dashboard, use the `Generate Monthly Report` panel to open the report UI and start a monthly export.
 
@@ -147,6 +152,7 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `UPDATE_CRON` | `0 23 * * *` | Cron: daily at 11 PM UTC (6 PM ET) |
 | `YFINANCE_CHUNK_SIZE` | `50` | Tickers per batch (rate limit mitigation) |
 | `YFINANCE_SYMBOL_RETRIES` | `2` | Additional targeted retry attempts for missing symbols during recovery |
+| `YFINANCE_EMPTY_RESPONSE_RETRIES` | `0` | Additional retries when Yahoo returns no rows for a recovery symbol request; keep `0` to fail fast for symbols that simply were not trading yet in the requested backfill window |
 | `YFINANCE_RECOVERY_CHUNK_SIZE` | `5` | Small-batch size used when retrying only missing symbols from a partial chunk |
 | `YFINANCE_FAILED_SYMBOL_LOG_LIMIT` | `20` | Maximum failed symbols to print in the final warning summary for a run |
 | `YFINANCE_DELAY_SEC` | `2.5` | Delay between batches (seconds) |
@@ -155,6 +161,8 @@ Pasting only the contents of `docker-compose.yml` is not sufficient unless the s
 | `HISTORICAL_START` | `2020-01-01` | Start date for initial historical load |
 | `BACKFILL_START` | *(unset)* | Optional one-time startup backfill start date for older history on a populated database |
 | `STARTUP_POST_SYNC_MODE` | `background` | Populated-DB startup post-sync behavior: `background` starts the scheduler after OHLCV sync and defers indicators/analytics/reports to a one-shot catch-up job; `blocking` restores the legacy inline behavior |
+| `STARTUP_BACKFILL_MODE` | `background` | Populated-DB startup older-history backfill behavior when `BACKFILL_START` is set: `background` schedules the backfill after startup so the service becomes ready first; `blocking` runs the backfill inline before the scheduler starts |
+| `FETCHER_STATUS_PORT` | `8080` | Internal HTTP port used by the fetcher status endpoints and Docker readiness check |
 | `INDICATORS_ENABLED` | `true` | Enable persisted technical-indicator calculation after OHLCV syncs |
 | `INDICATOR_INCREMENTAL_LOOKBACK_ROWS` | `1000` | Row window used for normal incremental indicator refreshes per touched ticker |
 | `INDICATOR_REBUILD_ON_STARTUP` | `false` | Recompute indicators from full history for symbols explicitly rebuilt during startup processing; it does not force a full-universe populated-DB startup block |
@@ -203,6 +211,14 @@ During a backfill, the fetcher logs:
 - any partial-chunk recovery attempts for missing symbols
 - a final per-run fetch summary including recovered and permanently failed symbols
 - the final upsert count
+
+For a concise runtime summary, query the internal status endpoint from inside the fetcher container:
+
+```bash
+docker compose exec stock-fetcher python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8080/status').read().decode())"
+```
+
+`docker compose ps` will also show the `stock-fetcher` container health based on `/readyz`, which flips healthy once the blocking startup work is complete and the scheduler is running.
 
 You can also inspect the stored date range directly in PostgreSQL:
 

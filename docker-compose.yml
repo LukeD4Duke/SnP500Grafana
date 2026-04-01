@@ -32,12 +32,15 @@ services:
       UPDATE_CRON: ${UPDATE_CRON:-0 23 * * *}
       YFINANCE_CHUNK_SIZE: ${YFINANCE_CHUNK_SIZE:-50}
       YFINANCE_SYMBOL_RETRIES: ${YFINANCE_SYMBOL_RETRIES:-2}
+      YFINANCE_EMPTY_RESPONSE_RETRIES: ${YFINANCE_EMPTY_RESPONSE_RETRIES:-0}
       YFINANCE_RECOVERY_CHUNK_SIZE: ${YFINANCE_RECOVERY_CHUNK_SIZE:-5}
       YFINANCE_FAILED_SYMBOL_LOG_LIMIT: ${YFINANCE_FAILED_SYMBOL_LOG_LIMIT:-20}
       YFINANCE_DELAY_SEC: ${YFINANCE_DELAY_SEC:-2.5}
       HISTORICAL_START: ${HISTORICAL_START:-2020-01-01}
       BACKFILL_START: ${BACKFILL_START:-}
       STARTUP_POST_SYNC_MODE: ${STARTUP_POST_SYNC_MODE:-background}
+      STARTUP_BACKFILL_MODE: ${STARTUP_BACKFILL_MODE:-background}
+      FETCHER_STATUS_PORT: ${FETCHER_STATUS_PORT:-8080}
       INDICATORS_ENABLED: ${INDICATORS_ENABLED:-true}
       INDICATOR_INCREMENTAL_LOOKBACK_ROWS: ${INDICATOR_INCREMENTAL_LOOKBACK_ROWS:-1000}
       INDICATOR_REBUILD_ON_STARTUP: ${INDICATOR_REBUILD_ON_STARTUP:-false}
@@ -50,6 +53,18 @@ services:
       REPORT_MONTHLY_CRON: ${REPORT_MONTHLY_CRON:-30 0 1 * *}
     volumes:
       - ./reports:/app/reports
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, urllib.request; port=os.environ.get('FETCHER_STATUS_PORT','8080'); urllib.request.urlopen(f'http://127.0.0.1:{port}/readyz', timeout=5)"
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
     depends_on:
       timescaledb:
         condition: service_healthy
